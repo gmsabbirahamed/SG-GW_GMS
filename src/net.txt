@@ -1,0 +1,353 @@
+void networkTask(void* parameter) {
+    // Configure MQTT
+    mqtt.setServer(broker, 1883);
+    mqtt.setKeepAlive(30);
+    mqtt.setSocketTimeout(20);
+    mqtt.setCallback(mqttCallback);
+    
+    SerialMon.println("Network Task started");
+    // sendLedCommand(LED_CONNECTING);
+    
+    // State variables for connection management
+    unsigned long lastSuccessfulOperation = 0;
+    unsigned long connectionStartTime = 0;
+    bool modemWasInitialized = false;
+    uint8_t consecutiveMqttFailures = 0;
+    const uint8_t MAX_CONSECUTIVE_MQTT_FAILURES = 5;
+    
+    while (1) {
+        if (otaInProgress) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+        
+        // Reset connection state
+        gprsConnected = false;
+        mqttConnected = false;
+        deviceOnline = false;
+        consecutiveMqttFailures = 0;
+        
+        // ========== PHASE 1: MODEM INITIALIZATION ==========
+        SerialMon.println("\n=== NETWORK: Starting connection sequence ===");
+        sendLedCommand(LED_CONNECTING);
+        
+        // Only power cycle if modem was never initialized or has been stuck
+        if (!modemWasInitialized || (millis() - lastSuccessfulOperation > 300000)) { // 5 minutes
+            SerialMon.println("NetworkTask: Initial modem power cycle...");
+            if (!powerCycleModem()) {
+                SerialMon.println("NetworkTask: Modem power cycle failed! ESP restarting...");
+                delay(2000);
+                ESP.restart();
+            }
+        }
+        
+        // Initialize modem (with retries)
+        modemInitRetries = 0;
+        while (!initializeModem() && modemInitRetries < MAX_MODEM_INIT_RETRIES) {
+            modemInitRetries++;
+            SerialMon.printf("NetworkTask: Modem init failed, retry %d/%d\n", 
+                           modemInitRetries, MAX_MODEM_INIT_RETRIES);
+            
+            // Try soft reset after first failure
+            if (modemInitRetries == 1) {
+                SerialMon.println("NetworkTask: Trying modem soft reset...");
+                modem.restart();
+                delay(3000);
+            }
+            
+            delay(5000);
+        }
+        
+        if (modemInitRetries >= MAX_MODEM_INIT_RETRIES) {
+            SerialMon.println("NetworkTask: Max modem init retries reached! ESP restarting...");
+            delay(2000);
+            ESP.restart();
+        }
+        
+        modemWasInitialized = true;
+        SerialMon.println("NetworkTask: Modem initialized successfully");
+        
+        // ========== PHASE 2: GPRS CONNECTION ==========
+        gprsRetries = 0;
+        gsmErrorCount = 0;
+        connectionStartTime = millis();
+        
+        while (1) {
+            // Check if we should restart the whole sequence
+            if (millis() - connectionStartTime > 300000) { // 5 minutes timeout
+                SerialMon.println("NetworkTask: Connection sequence timeout, restarting...");
+                break;
+            }
+            
+            if (!connectToGPRS()) {
+                gprsRetries++;
+                SerialMon.printf("NetworkTask: GPRS connect failed, retry %d/%d\n", 
+                               gprsRetries, MAX_GPRS_RETRIES);
+                
+                if (gprsRetries >= MAX_GPRS_RETRIES) {
+                    gsmErrorCount++;
+                    SerialMon.printf("NetworkTask: GSM Error count: %d/%d\n", 
+                                   gsmErrorCount, MAX_GSM_ERRORS);
+                    
+                    if (gsmErrorCount >= MAX_GSM_ERRORS) {
+                        SerialMon.println("NetworkTask: Max GSM errors! ESP restarting...");
+                        delay(2000);
+                        ESP.restart();
+                    }
+                    
+                    // Wait before retrying
+                    lastGsmErrorTime = millis();
+                    while (millis() - lastGsmErrorTime < GSM_ERROR_RETRY_DELAY) {
+                        sendLedCommand(LED_OFFLINE);
+                        vTaskDelay(pdMS_TO_TICKS(1000));
+                    }
+                    gprsRetries = 0;
+                }
+                delay(5000);
+                continue;
+            }
+            
+            // GPRS connected successfully
+            gprsConnected = true;
+            sendLedCommand(LED_CONNECTING);
+            SerialMon.println("NetworkTask: GPRS connected");
+            vTaskDelay(pdMS_TO_TICKS(500));
+            lastSuccessfulOperation = millis();
+            
+            // ========== PHASE 3: MQTT CONNECTION ==========
+            while (gprsConnected) {
+                // Try to connect to MQTT
+                if (!connectToMQTT()) {
+                    consecutiveMqttFailures++;
+                    SerialMon.printf("NetworkTask: MQTT connection failed %d/%d, rc=%d\n",
+                                   consecutiveMqttFailures, MAX_CONSECUTIVE_MQTT_FAILURES, mqtt.state());
+                    
+                    if (consecutiveMqttFailures >= MAX_CONSECUTIVE_MQTT_FAILURES) {
+                        SerialMon.println("NetworkTask: Too many MQTT failures, restarting GPRS...");
+                        modem.gprsDisconnect();
+                        gprsConnected = false;
+                        consecutiveMqttFailures = 0;
+                        sendLedCommand(LED_CONNECTING);
+                        delay(2000);
+                        break; // Go back to GPRS connection loop
+                    }
+                    // Wait before retrying MQTT
+                    delay(3000);
+                    continue;
+                }
+                
+                // MQTT connected successfully
+                consecutiveMqttFailures = 0;
+                mqttConnected = true;
+                deviceOnline = true;
+                sendLedCommand(LED_ONLINE);
+                SerialMon.println("NetworkTask: Device ONLINE");
+                lastSuccessfulOperation = millis();
+                
+                // ========== PHASE 4: MAIN NETWORK LOOP ==========
+                unsigned long lastConnectionCheck = millis();
+                unsigned long lastKeepalive = millis();
+                const unsigned long CONNECTION_CHECK_INTERVAL = 10000; // 10 seconds
+                const unsigned long KEEPALIVE_INTERVAL = 30000; // 30 seconds
+                
+                while (gprsConnected && mqttConnected) {
+                    // Send periodic MQTT keepalive
+                    if (millis() - lastKeepalive >= KEEPALIVE_INTERVAL) {
+                        if (xSemaphoreTake(mqttMutex, pdMS_TO_TICKS(1000))) {
+                            mqtt.loop(); // This handles keepalive
+                            xSemaphoreGive(mqttMutex);
+                        }
+                        lastKeepalive = millis();
+                    }
+                    
+                    // Process MQTT messages
+                    if (xSemaphoreTake(mqttMutex, pdMS_TO_TICKS(100))) {
+                        mqtt.loop();
+                        xSemaphoreGive(mqttMutex);
+                    }
+                    
+                    // Process MQTT publish queue
+                    MQTTMessage msg;
+                    int publishQueueItems = uxQueueMessagesWaiting(mqttPublishQueue);
+                    
+                    for (int i = 0; i < publishQueueItems; i++) {
+                        if (xQueueReceive(mqttPublishQueue, &msg, 0) == pdTRUE) {
+                            if (xSemaphoreTake(mqttMutex, pdMS_TO_TICKS(500))) {
+                                bool published = mqtt.publish(msg.topic, msg.payload);
+                                xSemaphoreGive(mqttMutex);
+                                
+                                if (published) {
+                                    SerialMon.printf("NetworkTask: Published - %s: %s\n", 
+                                                   msg.topic, msg.payload);
+                                } else {
+                                    // Re-queue if failed
+                                    SerialMon.println("NetworkTask: Publish failed, requeuing");
+                                    xQueueSendToFront(mqttPublishQueue, &msg, 0);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Check connections periodically (not every loop)
+                    if (millis() - lastConnectionCheck >= CONNECTION_CHECK_INTERVAL) {
+                        lastConnectionCheck = millis();
+                        
+                        // Check GPRS connection
+                        bool gprsAlive = modem.isGprsConnected();
+                        if (!gprsAlive) {
+                            SerialMon.println("NetworkTask: GPRS connection lost");
+                            gprsConnected = false;
+                            mqttConnected = false;
+                            deviceOnline = false;
+                            sendLedCommand(LED_OFFLINE);
+                            break;
+                        }
+                        
+                        // Check MQTT connection
+                        if (xSemaphoreTake(mqttMutex, pdMS_TO_TICKS(500))) {
+                            bool mqttAlive = mqtt.connected();
+                            xSemaphoreGive(mqttMutex);
+                            
+                            if (!mqttAlive) {
+                                SerialMon.println("NetworkTask: MQTT connection lost");
+                                mqttConnected = false;
+                                deviceOnline = false;
+                                sendLedCommand(LED_CONNECTING);
+                                break;
+                            }
+                        }
+                        
+                        lastSuccessfulOperation = millis();
+                    }
+                    
+                    // Small delay to prevent CPU hogging
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                }
+                
+                // ========== PHASE 5: CONNECTION RECOVERY ==========
+                if (!gprsConnected) {
+                    // GPRS was lost, break to outer loop to restart
+                    mqttConnected = false;
+                    deviceOnline = false;
+                    sendLedCommand(LED_OFFLINE);
+                    SerialMon.println("NetworkTask: GPRS lost, restarting connection...");
+                    break;
+                }
+                
+                if (!mqttConnected) {
+                    // Only MQTT was lost, try to reconnect
+                    deviceOnline = false;
+                    sendLedCommand(LED_CONNECTING);
+                    SerialMon.println("NetworkTask: MQTT lost, attempting reconnect...");
+                    
+                    // Clean up MQTT
+                    if (xSemaphoreTake(mqttMutex, pdMS_TO_TICKS(1000))) {
+                        mqtt.disconnect();
+                        xSemaphoreGive(mqttMutex);
+                    }
+                    
+                    // Small delay before reconnecting
+                    delay(2000);
+                    
+                    // Continue to MQTT connection loop
+                    continue;
+                }
+            }
+            
+            // Cleanup before restarting GPRS connection
+            if (xSemaphoreTake(mqttMutex, pdMS_TO_TICKS(1000))) {
+                mqtt.disconnect();
+                xSemaphoreGive(mqttMutex);
+            }
+            
+            if (modem.isGprsConnected()) {
+                modem.gprsDisconnect();
+                delay(1000);
+            }
+            
+            gprsConnected = false;
+            mqttConnected = false;
+            deviceOnline = false;
+            sendLedCommand(LED_OFFLINE);
+            
+            SerialMon.println("NetworkTask: Connection lost, restarting...");
+            delay(3000);
+            
+            // Break to restart the whole connection sequence
+            break;
+        }
+        
+        // If we get here, connection sequence failed, restart
+        SerialMon.println("NetworkTask: Restarting connection sequence...");
+        delay(5000);
+    }
+}
+
+
+
+
+
+
+
+
+bool connectToMQTT() {
+    SerialMon.println("NetworkTask: Connecting to MQTT...");
+    
+    if (xSemaphoreTake(mqttMutex, pdMS_TO_TICKS(5000))) {
+        
+        mqtt.disconnect();
+        mqttClient.stop();
+        delay(500);
+        // Generate unique client ID
+        // String clientId = "GMS-" + DEVICE_ID + "-" + String(esp_random() & 0xFFFF);
+        String clientId = "GMS-" + DEVICE_ID ;
+        
+        // Set shorter timeout for first attempt
+        mqtt.setSocketTimeout(15);
+        
+        bool connected = mqtt.connect(clientId.c_str(), mqttUser, mqttPass);
+        
+        if (!connected) {
+            // Try with different socket timeout
+            mqtt.setSocketTimeout(30);
+            connected = mqtt.connect(clientId.c_str(), mqttUser, mqttPass);
+        }
+        
+        if (connected) {
+            SerialMon.println("NetworkTask: MQTT connected");
+            
+            // Subscribe to topics
+            mqtt.subscribe(subTopic);
+            SerialMon.printf("NetworkTask: Subscribed to: %s\n", subTopic);
+            
+            // Send initialization message
+            MQTTMessage initMsg;
+            snprintf(initMsg.topic, sizeof(initMsg.topic), "%s", pubTopic);
+            snprintf(initMsg.payload, sizeof(initMsg.payload), 
+                     "{\"device\":\"%s\",\"type\":\"init\",\"status\":\"online\",\"version\":\"%s\",\"rssi\":%d}",
+                     DEVICE_ID.c_str(), FW_VERSION, modem.getSignalQuality());
+            
+            // Send directly (not through queue) to ensure it goes out
+            if (mqtt.publish(initMsg.topic, initMsg.payload)) {
+                SerialMon.println("NetworkTask: Initialization message sent");
+            } else {
+                SerialMon.println("NetworkTask: Failed to send initialization message");
+            }
+            
+            // Restore normal socket timeout
+            mqtt.setSocketTimeout(30);
+        } else {
+            SerialMon.printf("NetworkTask: MQTT connection failed, rc=%d\n", mqtt.state());
+            
+            // Additional debug info
+            if (mqtt.state() == -4) {
+                SerialMon.println("NetworkTask: MQTT timeout - check broker address/port");
+            }
+        }
+        
+        xSemaphoreGive(mqttMutex);
+        return connected;
+    }
+    
+    return false;
+}
