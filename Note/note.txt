@@ -1,0 +1,38 @@
+/*
+    ===     sensor/rfTask       ===
+-> read rf sensor and enqueue in queue [max 10]
+    if queue is full then remove/dequeue oldest and enqueue new.
+
+    ===     main Task      ===
+1. if deevice is online -> check queue- if data is availabe then dequeue data send to mqtt.
+2. if deevice is online -> send heartbeat in every 1min.
+3. if deevice is online -> sync ntp. [sync every 10min then calculate locally. so that time will correct while device power on (without internet)]
+4. device health monitoring. [normally serial print in every 5min]
+
+    ===     button Task     ===
+read button press -> single click, long press [3/5//10 sec]
+1. after single click -> yellow blink & print single click detect.
+2. if press duration reached 3sec -> led will be show solid green. & after released button - serial print "3sec press detect"
+3. if press duration reached 5sec -> led will be show solid blue. & after released button - serial print "5sec press detect"
+3. if press duration reached 10sec -> led will be show solid purple. & after released button - serial print "10sec press detect"
+
+    ===     led Task     ===
+show led status as per need.
+
+    ===     network Task    ===
+-manage network [GSM and MQTT]-
+network task workflow-
+1. set mqtt
+2. boot the modem (hard reset/off-on and test AT) [2times] ->if failed esp restart.
+3. initialized modem (waitfornetwork and ..) -> if failed [rpt 3times] esp restart
+4. try to connect to network (disconnect previous gprs & connect fresh gprs with apn,user,pass) [max 3 retry] if failed -> esp restart
+5. if gprs is connected & mqtt is not connected -> try to connect/reconnect mqtt
+6. if mqtt is connected && gprs is connected = online otherwise offline
+7. if device is offline ->
+        find the reason 
+            if gprs is connected && mqtt is not connected -> try to reconnect mqtt (5times) -> if failed- go to offline for 1min.
+            if gprs is disconnected -> disconnect gprs+mqtt and try to fresh reconnect all (gprs+mqtt) with retry .-> if failed -go to offline for 1min.
+
+    ===     ota Task    ===
+will create after mqtt command.
+*/
