@@ -70,16 +70,16 @@ Author: Sabbir Ahamed
 #include <Bounce2.h>
 
 // ==================== Configuration ====================
-#define WORK_PACKAGE "1101"
-#define DEVICE_TYPE "00"
-#define DEVICE_CODE_UPLOAD_DATE "250803"
+#define WORK_PACKAGE "1102"
+#define DEVICE_TYPE "05"
+#define DEVICE_CODE_UPLOAD_DATE "260311"
 #define DEVICE_SERIAL_ID "9999"
 
 #define UNIQUE_DEVICE_ID WORK_PACKAGE DEVICE_TYPE DEVICE_CODE_UPLOAD_DATE DEVICE_SERIAL_ID
 
 #define OTA 1
 #define HW_VERSION "1.0.0"
-#define FW_VERSION "1.0.0"
+#define FW_VERSION "1.501"
 #define OTA_DATE "260101"
 
 String DEVICE_ID = "";
@@ -124,6 +124,10 @@ Preferences preferences;
 #define MODEM_PWR 15
 #define ONE_WIRE_BUS 19
 #define HORN_PIN 25
+#define ACLINE_PIN 34
+
+#define ON LOW
+#define OFF HIGH
 
 
 // LED configuration
@@ -212,7 +216,8 @@ enum LedCommandType {
     LED_BUTTON_HOLD_3SEC,
     LED_BUTTON_HOLD_5SEC,
     LED_BUTTON_HOLD_10SEC,
-    LED_OTA_IN_PROGRESS
+    LED_OTA_IN_PROGRESS,
+    LED_PING_ACK
 };
 
 enum ButtonEventType {
@@ -246,9 +251,9 @@ struct ButtonEvent {
 };
 
 // ==================== Global Variables ====================
-const char* pubTopic = "DMA/GMS/PUB";
-const char* subTopic = "DMA/GMS/SUB";
-const char* hbTopic = "DMA/GMS/HB";
+const char* pubTopic = "DMA/SG/PUB";
+const char* subTopic = "DMA/SG/";
+const char* hbTopic = "DMA/SG/PUB";
 
 // System State
 volatile bool mqttConnected = false;
@@ -328,8 +333,9 @@ void setup() {
     // Initialize RF sensor pin
     pinMode(RF_SENSOR_PIN, INPUT);
     pinMode(HORN_PIN, OUTPUT);
+    pinMode(ACLINE_PIN, INPUT);  
 
-    digitalWrite(HORN_PIN, LOW);
+    digitalWrite(HORN_PIN, OFF);
     
     // Get MAC address for fallback ID
     MAC_FALLBACK_ID = getMACDeviceID();
@@ -964,9 +970,14 @@ void ledTask(void* parameter) {
             case LED_GSM_INIT:
             {
                 //Rainbow animation
-                static uint8_t hue = 0;
+                // static uint8_t hue = 0;
                 // leds[0] = CHSV(hue = hue+10, 255, currentCommand.brightness);
-                leds[0] = CHSV(hue = hue+5, 255, 255);
+                // leds[0] = CHSV(hue = hue+5, 255, 255);
+                if (millis() - lastBlinkTime > 500) {
+                    blinkState = !blinkState;
+                    leds[0] = blinkState ? CRGB::Red : CRGB::Black;
+                    lastBlinkTime = millis();
+                }
             }
             break;
                 // Solid Purple
@@ -1081,6 +1092,20 @@ void ledTask(void* parameter) {
                 leds[0] = CHSV(hue = hue+20, 255, 255);
             }
             break;
+            case LED_PING_ACK:
+                // Green flash
+                leds[0] = CRGB::Green;
+                FastLED.show();
+                vTaskDelay(pdMS_TO_TICKS(100));
+                leds[0] = CRGB::Black;
+                FastLED.show();
+                vTaskDelay(pdMS_TO_TICKS(100));
+                leds[0] = CRGB::Green;
+                FastLED.show();
+                vTaskDelay(pdMS_TO_TICKS(100));
+                leds[0] = CRGB::Black;
+                FastLED.show();
+                break;
                 // Purple blinking for OTA
                 // if (millis() - lastBlinkTime > 300) {
                 //     blinkState = !blinkState;
@@ -1232,8 +1257,9 @@ bool connectToMQTT() {
 
     if (connected) {
         SerialMon.println("NetworkTask: MQTT connected");
-        mqtt.subscribe(subTopic);
-        SerialMon.printf("NetworkTask: Subscribed to: %s\n", subTopic);
+        String fullSubTopic = subTopic + DEVICE_ID;
+        mqtt.subscribe(fullSubTopic.c_str());
+        SerialMon.printf("NetworkTask: Subscribed to: %s\n", fullSubTopic.c_str());
     } else {
         Serial.printf("MQTT Connect failed (%d %s)\n", 
                       mqtt.state(), mqttStateToText(mqtt.state()).c_str());
@@ -1249,72 +1275,111 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         message += (char)payload[i];
     }
     message.trim();
+
+    Serial.println("\n========== MQTT Message Received ==========");
+    Serial.print("Topic: ");
+    Serial.println(topic);
+    Serial.print("Payload: ");
+    Serial.println(message);
+    Serial.println("==========================================\n");
+
+    if(message == "alarm off") {
+        Serial.println("MQTT Command: Alarm ON received");
+        digitalWrite(HORN_PIN, ON);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        digitalWrite(HORN_PIN, OFF);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        digitalWrite(HORN_PIN, ON);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        digitalWrite(HORN_PIN, OFF);
+    }
+    else if(message == "alarm on"){
+        Serial.println("MQTT Command: Alarm OFF received");
+        digitalWrite(HORN_PIN, ON);
+    } 
+
+    else if(message == "ping") {
+        Serial.println("MQTT Command: Ping received");
+        MQTTMessage response;
+        snprintf(response.topic, sizeof(response.topic), "%s", pubTopic);
+        snprintf(response.payload, sizeof(response.payload), "%s,%d", DEVICE_ID.c_str(), modem.getSignalQuality());
+        sendLedCommand(LED_PING_ACK);
+        xQueueSend(mqttPublishQueue, &response, pdMS_TO_TICKS(100));
+    }
     
-    SerialMon.printf("NetworkTask: MQTT message - Topic: %s, Payload: %s\n", topic, message.c_str());
-    sendLedCommand(LED_MQTT_RECEIVE);
+
+    //=======================================================//
+    // SerialMon.printf("NetworkTask: MQTT message - Topic: %s, Payload: %s\n", topic, message.c_str());
+    // sendLedCommand(LED_MQTT_RECEIVE);
+
+    // if(payload == NULL || length == 0) {
+    //     SerialMon.println("NetworkTask: Empty MQTT payload received, ignoring");
+    //     return;
+    // }
     
-    if (strcmp(topic, subTopic) == 0) {
+    // if (strcmp(topic, subTopic) == 0) {
         // Parse JSON or command
-        if (message.indexOf("ping") != -1) {
-            MQTTMessage response;
-            snprintf(response.topic, sizeof(response.topic), "%s", pubTopic);
-            snprintf(response.payload, sizeof(response.payload), "{\"device\":\"%s\",\"rssi\":\"%d\"}", DEVICE_ID.c_str(), modem.getSignalQuality());
-            xQueueSend(mqttPublishQueue, &response, pdMS_TO_TICKS(100));
-        }
-        else if (message.indexOf("rssi") != -1) {
-            int rssi = modem.getSignalQuality();
-            MQTTMessage response;
-            snprintf(response.topic, sizeof(response.topic), "%s", pubTopic);
-            snprintf(response.payload, sizeof(response.payload), 
-                     "{\"device\":\"%s\",\"rssi\":%d}", DEVICE_ID.c_str(), rssi);
-            xQueueSend(mqttPublishQueue, &response, pdMS_TO_TICKS(100));
-        }
+        // if (message.indexOf("ping") != -1) {
+        //     MQTTMessage response;
+        //     snprintf(response.topic, sizeof(response.topic), "%s", pubTopic);
+        //     snprintf(response.payload, sizeof(response.payload), "{\"device\":\"%s\",\"rssi\":\"%d\"}", DEVICE_ID.c_str(), modem.getSignalQuality());
+        //     xQueueSend(mqttPublishQueue, &response, pdMS_TO_TICKS(100));
+        // }
+        // else if (message.indexOf("rssi") != -1) {
+        //     int rssi = modem.getSignalQuality();
+        //     MQTTMessage response;
+        //     snprintf(response.topic, sizeof(response.topic), "%s", pubTopic);
+        //     snprintf(response.payload, sizeof(response.payload), 
+        //              "{\"device\":\"%s\",\"rssi\":%d}", DEVICE_ID.c_str(), rssi);
+        //     xQueueSend(mqttPublishQueue, &response, pdMS_TO_TICKS(100));
+        // }
 
-
-        else if (message.indexOf("alarm off") != -1) {
-            digitalWrite(HORN_PIN, HIGH);
-            vTaskDelay(pdMS_TO_TICKS(300));
-            digitalWrite(HORN_PIN, LOW);
-            vTaskDelay(pdMS_TO_TICKS(200));
-            digitalWrite(HORN_PIN, HIGH);
-            vTaskDelay(pdMS_TO_TICKS(300));
-            digitalWrite(HORN_PIN, LOW);
-        }
-        else if (message.indexOf("alarm on") != -1) {
-            digitalWrite(HORN_PIN, HIGH);
-        }
+        // else if (message.indexOf("alarm off") != -1) {
+        //     Serial.println("Alarm OFF command received - sounding horn");
+        //     digitalWrite(HORN_PIN, LOW);
+        //     vTaskDelay(pdMS_TO_TICKS(200));
+        //     digitalWrite(HORN_PIN, HIGH);
+        //     vTaskDelay(pdMS_TO_TICKS(200));
+        //     digitalWrite(HORN_PIN, LOW);
+        //     vTaskDelay(pdMS_TO_TICKS(200));
+        //     digitalWrite(HORN_PIN, HIGH);
+        // }
+        // else if (message.indexOf("alarm on") != -1) {
+        //     Serial.println("Alarm ON command received - silencing horn");
+        //     digitalWrite(HORN_PIN, LOW);
+        // }
 
         ///////////////////////////////////////////
-        else if (message.indexOf("ota") != -1) {
-            firmwareUrl = defaultFirmwareUrl;
-            // Create OTA task
-            createOTATask();
-        }
+        // else if (message.indexOf("ota") != -1) {
+        //     firmwareUrl = defaultFirmwareUrl;
+        //     // Create OTA task
+        //     createOTATask();
+        // }
 
-        else if (message.startsWith("http://") || message.startsWith("https://")) {
-            firmwareUrl = message;
-            createOTATask();
-        } else if (message.startsWith("ota ")) {
-            String link = message.substring(4);
-            link.trim();
-            if (link.startsWith("http://") || link.startsWith("https://")) {
-                firmwareUrl = link;
-                createOTATask();
-            }
-        }
+        // else if (message.startsWith("http://") || message.startsWith("https://")) {
+        //     firmwareUrl = message;
+        //     createOTATask();
+        // } else if (message.startsWith("ota ")) {
+        //     String link = message.substring(4);
+        //     link.trim();
+        //     if (link.startsWith("http://") || link.startsWith("https://")) {
+        //         firmwareUrl = link;
+        //         createOTATask();
+        //     }
+        // }
         //////////////////////////////////////
 
 
-        else if (message.indexOf("restart") != -1) {
-            MQTTMessage response;
-            snprintf(response.topic, sizeof(response.topic), "%s", pubTopic);
-            snprintf(response.payload, sizeof(response.payload), 
-                     "{\"device\":\"%s\",\"status\":\"restarting\"}", DEVICE_ID.c_str());
-            xQueueSend(mqttPublishQueue, &response, pdMS_TO_TICKS(100));
-            delay(1000);
-            ESP.restart();
-        }
-    }
+    //     else if (message.indexOf("restart") != -1) {
+    //         MQTTMessage response;
+    //         snprintf(response.topic, sizeof(response.topic), "%s", pubTopic);
+    //         snprintf(response.payload, sizeof(response.payload), 
+    //                  "{\"device\":\"%s\",\"status\":\"restarting\"}", DEVICE_ID.c_str());
+    //         xQueueSend(mqttPublishQueue, &response, pdMS_TO_TICKS(100));
+    //         delay(1000);
+    //         ESP.restart();
+    //     }
+    // }
 }
 
 //1102032505280029,W:1,G:1,C:1,M:1,V:1.472
@@ -1325,7 +1390,18 @@ void publishHeartbeat() {
     int health = ESP.getFreeHeap();
     int uptime_m = millis() / 60000;
 
-    String payload = DEVICE_ID + "," + FW_VERSION + "," + HW_VERSION + "," + 1100 + "," + health  + "," + uptime_m + "," + rssi ;
+    //String payload = DEVICE_ID + "," + FW_VERSION + "," + HW_VERSION + "," + 1100 + "," + health  + "," + uptime_m + "," + rssi ;
+    bool acLine = digitalRead(ACLINE_PIN) == HIGH ? true : false;
+    bool wifiActive = false;
+    bool gsmActive = true;
+    bool ModeArm = true;
+    #define VERSION "1.501"
+
+    String payload = String(DEVICE_ID) + ",W:" + (wifiActive ? "1" : "0") + 
+                        ",G:" + (gsmActive ? "1" : "0") + 
+                        ",C:" + (acLine ? "1" : "0") + 
+                        ",M:" + (ModeArm ? "1" : "0") + 
+                        ",V:" + VERSION;
     Serial.println(payload);
     snprintf(hbMsg.payload, sizeof(hbMsg.payload), "%s", payload.c_str());
     
@@ -1333,6 +1409,8 @@ void publishHeartbeat() {
         SerialMon.println("MainTask: Heartbeat queued");
     }
 }
+
+
 
 // ==================== Helper Functions ====================
 String getMACDeviceID() {
