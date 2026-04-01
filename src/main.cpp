@@ -23,9 +23,9 @@ connecting network -> red blinking
 offline -> solid red
 online -> black
 mqtt message received -> single blue blink
-rf signal detect -> single white blink
+rf signal detect -> single blue blink with 250ms delay
 heartbeat send -> single cyan blink
-data send -> single green blink
+data send -> double green blink with 250ms delay between them
 
 ===     rf sensor task      ===
 read rf sensor and enqueue in queue - max 50 (if queue is full dequeue oldest data and enqueue new)
@@ -71,15 +71,16 @@ Author: Sabbir Ahamed
 
 // ==================== Configuration ====================
 #define WORK_PACKAGE "1102"
-#define DEVICE_TYPE "05"
-#define DEVICE_CODE_UPLOAD_DATE "260311"
-#define DEVICE_SERIAL_ID "9999"
+#define DEVICE_TYPE "03"
+#define DEVICE_CODE_UPLOAD_DATE "251111"
+#define DEVICE_SERIAL_ID "0115"
 
 #define UNIQUE_DEVICE_ID WORK_PACKAGE DEVICE_TYPE DEVICE_CODE_UPLOAD_DATE DEVICE_SERIAL_ID
 
-#define OTA 1
-#define HW_VERSION "1.0.0"
-#define FW_VERSION "1.501"
+#define HORN_MODE 1  // 1 WIred, 0 Wireless
+#define OTA 1  // Set to 1 for OTA mode, 0 for normal mode
+#define HW_VERSION "3.0"
+#define FW_VERSION "V1.502"
 #define OTA_DATE "260101"
 
 String DEVICE_ID = "";
@@ -126,8 +127,8 @@ Preferences preferences;
 #define HORN_PIN 25
 #define ACLINE_PIN 34
 
-#define ON LOW
-#define OFF HIGH
+#define ON HIGH
+#define OFF LOW
 
 
 // LED configuration
@@ -137,6 +138,7 @@ CRGB leds[NUM_LEDS];
 
 // RF Sensor pin
 #define RF_SENSOR_PIN 26
+#define RF_TX_PIN 25
 
 // Configuration
 const char apn[] = "internet";
@@ -156,7 +158,7 @@ const char* mqttPass = "Secret!@#$1234";
 
 String firmwareUrl = "";
 // const char* defaultFirmwareUrl = "http://ota.gmsabbirahamed.com/esp32/firmware/blink/firmware.bin";
-const char* defaultFirmwareUrl = "http://iot2.dma-bd.com:5000/download/MeshAC261025.bin";
+const char* defaultFirmwareUrl = "http://iot2.dma-bd.com:5000/download/iotsecurityv3101.bin";
 
 // ==================== FreeRTOS Configuration ====================
 // Task handles
@@ -217,7 +219,9 @@ enum LedCommandType {
     LED_BUTTON_HOLD_5SEC,
     LED_BUTTON_HOLD_10SEC,
     LED_OTA_IN_PROGRESS,
-    LED_PING_ACK
+    LED_PING_ACK,
+    LED_ALARM_ON,
+    LED_ALARM_OFF
 };
 
 enum ButtonEventType {
@@ -317,12 +321,15 @@ void setup() {
     SerialMon.begin(115200);
     delay(100);
 
-    SerialMon.println("\n===================================");
-    SerialMon.println("  ==      IoT GATEWAY FIRMWARE     ==");
-    SerialMon.printf ("  ==       FW Version %          ==");
-    SerialMon.printf ("  ==       HW Version 1.0.1          ==");
-    SerialMon.println("  ==        Hello! Sabbir          ==");
-    SerialMon.println("  ===================================\n");
+    SerialMon.println("\n====================================");
+    SerialMon.println("  ==    DMA IoT Security GATEWAY    ==");
+    SerialMon.println("--------------------------------------");
+    SerialMon.printf ("  ==      FW Version: %s        ==", FW_VERSION);
+    SerialMon.println();
+    SerialMon.printf ("  ==      HW Version: %s        ==", HW_VERSION);
+    SerialMon.println();
+    SerialMon.println("  ====================================\n");
+    SerialMon.println();
     
     // Initialize LED hardware
     FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
@@ -332,6 +339,7 @@ void setup() {
         
     // Initialize RF sensor pin
     pinMode(RF_SENSOR_PIN, INPUT);
+    rfSwitch.enableTransmit(RF_TX_PIN);
     pinMode(HORN_PIN, OUTPUT);
     pinMode(ACLINE_PIN, INPUT);  
 
@@ -465,7 +473,7 @@ void networkTask(void* parameter) {
     // MQTT configuration
     mqtt.setServer(broker, 1883);
     mqtt.setKeepAlive(30);
-    mqtt.setSocketTimeout(20);
+    // mqtt.setSocketTimeout(10);
     mqtt.setCallback(mqttCallback);
 
     SerialMon.println("Network Task started");
@@ -474,7 +482,7 @@ void networkTask(void* parameter) {
     // Persistent state variables
     unsigned long lastSuccessfulOperation = 0;
     uint8_t consecutiveMqttFailures = 0;
-    const uint8_t MAX_CONSECUTIVE_MQTT_FAILURES = 5;
+    const uint8_t MAX_CONSECUTIVE_MQTT_FAILURES = 10;
 
     while (1) {
         // Skip if OTA is in progress
@@ -886,7 +894,7 @@ void rfSensorTask(void* parameter) {
     
     uint32_t lastRFValue = 0;
     unsigned long lastRFTime = 0;
-    const unsigned long DEBOUNCE_TIME = 800;
+    const unsigned long DEBOUNCE_TIME = 2000;
     
     while (1) {
         if (otaInProgress) {
@@ -999,10 +1007,11 @@ void ledTask(void* parameter) {
                 
             case LED_RF_DETECT:
                 // Single white blink
-                leds[0] = CRGB::White;
+                leds[0] = CRGB::Blue;
                 FastLED.show();
-                vTaskDelay(pdMS_TO_TICKS(100));
+                vTaskDelay(pdMS_TO_TICKS(250));
                 leds[0] = CRGB::Black;
+                FastLED.show();
                 // Return to previous state
                 if (deviceOnline) {
                     currentCommand.type = LED_ONLINE;
@@ -1023,6 +1032,7 @@ void ledTask(void* parameter) {
                 FastLED.show();
                 vTaskDelay(pdMS_TO_TICKS(100));
                 leds[0] = CRGB::Black;
+                FastLED.show();
                 // Return to previous state
                 if (deviceOnline) {
                     currentCommand.type = LED_ONLINE;
@@ -1037,8 +1047,15 @@ void ledTask(void* parameter) {
                 // Single green blink
                 leds[0] = CRGB::Green;
                 FastLED.show();
-                vTaskDelay(pdMS_TO_TICKS(100));
+                vTaskDelay(pdMS_TO_TICKS(250));
                 leds[0] = CRGB::Black;
+                FastLED.show();
+                vTaskDelay(pdMS_TO_TICKS(250));
+                leds[0] = CRGB::Green;
+                FastLED.show();
+                vTaskDelay(pdMS_TO_TICKS(250));
+                leds[0] = CRGB::Black;
+                FastLED.show();
                 // Return to previous state
                 if (deviceOnline) {
                     currentCommand.type = LED_ONLINE;
@@ -1053,8 +1070,9 @@ void ledTask(void* parameter) {
                 // Single blue blink
                 leds[0] = CRGB::Blue;
                 FastLED.show();
-                vTaskDelay(pdMS_TO_TICKS(100));
+                vTaskDelay(pdMS_TO_TICKS(200));
                 leds[0] = CRGB::Black;
+                FastLED.show();
                 // Return to previous state
                 if (deviceOnline) {
                     currentCommand.type = LED_ONLINE;
@@ -1069,8 +1087,9 @@ void ledTask(void* parameter) {
                 // Yellow flash
                 leds[0] = CRGB::Yellow;
                 FastLED.show();
-                vTaskDelay(pdMS_TO_TICKS(50));
+                vTaskDelay(pdMS_TO_TICKS(200));
                 leds[0] = CRGB::Black;
+                FastLED.show();
                 break;
                 
             case LED_BUTTON_HOLD_3SEC:
@@ -1105,14 +1124,49 @@ void ledTask(void* parameter) {
                 vTaskDelay(pdMS_TO_TICKS(100));
                 leds[0] = CRGB::Black;
                 FastLED.show();
+                // Return to previous state
+                if (deviceOnline) {
+                    currentCommand.type = LED_ONLINE;
+                } else if (gprsConnected) {
+                    currentCommand.type = LED_CONNECTING;
+                } else {
+                    currentCommand.type = LED_OFFLINE;
+                }
                 break;
-                // Purple blinking for OTA
-                // if (millis() - lastBlinkTime > 300) {
-                //     blinkState = !blinkState;
-                //     leds[0] = blinkState ? CRGB::Purple : CRGB::Black;
-                //     lastBlinkTime = millis();
-                // }
-                // break;
+
+            case LED_ALARM_ON:
+                // Solid orange
+                leds[0] = CRGB::Orange;
+                FastLED.show();
+                vTaskDelay(pdMS_TO_TICKS(500));
+                leds[0] = CRGB::Black;
+                FastLED.show();
+                // Return to previous state
+                if (deviceOnline) {
+                    currentCommand.type = LED_ONLINE;
+                } else if (gprsConnected) {
+                    currentCommand.type = LED_CONNECTING;
+                } else {
+                    currentCommand.type = LED_OFFLINE;
+                }
+                break;
+                
+            case LED_ALARM_OFF:
+                // SkyBlue
+                leds[0] = CRGB::SkyBlue;
+                FastLED.show();
+                vTaskDelay(pdMS_TO_TICKS(250));
+                leds[0] = CRGB::Black;
+                FastLED.show();
+                // Return to previous state
+                if (deviceOnline) {
+                    currentCommand.type = LED_ONLINE;
+                } else if (gprsConnected) {
+                    currentCommand.type = LED_CONNECTING;
+                } else {
+                    currentCommand.type = LED_OFFLINE;
+                }
+                break;
         }
         
         FastLED.show();
@@ -1254,6 +1308,13 @@ bool connectToMQTT() {
     if (!connected) {
         connected = mqtt.connect(clientId.c_str(), mqttUser, mqttPass);
     }
+    // for(int i = 0; i < 5 && !connected; i++) {
+    //     SerialMon.printf("NetworkTask: MQTT initial connect retry %d\n", i+1);
+    //     if (!connected) {
+    //         connected = mqtt.connect(clientId.c_str(), mqttUser, mqttPass);
+    //     }
+    //     vTaskDelay(pdMS_TO_TICKS(500));
+    // }
 
     if (connected) {
         SerialMon.println("NetworkTask: MQTT connected");
@@ -1270,6 +1331,7 @@ bool connectToMQTT() {
 
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
+    sendLedCommand(LED_MQTT_RECEIVE);
     String message;
     for (unsigned int i = 0; i < length; i++) {
         message += (char)payload[i];
@@ -1284,18 +1346,34 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     Serial.println("==========================================\n");
 
     if(message == "alarm off") {
-        Serial.println("MQTT Command: Alarm ON received");
-        digitalWrite(HORN_PIN, ON);
-        vTaskDelay(pdMS_TO_TICKS(200));
-        digitalWrite(HORN_PIN, OFF);
-        vTaskDelay(pdMS_TO_TICKS(200));
-        digitalWrite(HORN_PIN, ON);
-        vTaskDelay(pdMS_TO_TICKS(200));
-        digitalWrite(HORN_PIN, OFF);
+        sendLedCommand(LED_ALARM_OFF);
+        Serial.println("MQTT Command: Alarm OFF received");
+        if(HORN_MODE == 1) {
+            digitalWrite(HORN_PIN, ON);
+            vTaskDelay(pdMS_TO_TICKS(200));
+            digitalWrite(HORN_PIN, OFF);
+            vTaskDelay(pdMS_TO_TICKS(200));
+            digitalWrite(HORN_PIN, ON);
+            vTaskDelay(pdMS_TO_TICKS(200));
+            digitalWrite(HORN_PIN, OFF);
+            return;
+        }
+        else {
+            rfSwitch.send(5190151, 24);
+            return;
+        }
     }
     else if(message == "alarm on"){
-        Serial.println("MQTT Command: Alarm OFF received");
-        digitalWrite(HORN_PIN, ON);
+        sendLedCommand(LED_ALARM_ON);
+        Serial.println("MQTT Command: Alarm ON received");
+        if(HORN_MODE == 1) {
+            digitalWrite(HORN_PIN, ON);
+            return;
+        }
+        else {
+            rfSwitch.send(5190153, 24);
+            return;
+        }
     } 
 
     else if(message == "ping") {
@@ -1305,6 +1383,28 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         snprintf(response.payload, sizeof(response.payload), "%s,%d", DEVICE_ID.c_str(), modem.getSignalQuality());
         sendLedCommand(LED_PING_ACK);
         xQueueSend(mqttPublishQueue, &response, pdMS_TO_TICKS(100));
+        return;
+    }
+
+    else if(message.startsWith("ota")) {
+        Serial.println("MQTT Command: OTA update received");
+        firmwareUrl = defaultFirmwareUrl;
+        createOTATask();
+        return;
+    }
+
+    else if (message.startsWith("http://") || message.startsWith("https://")) {
+        firmwareUrl = message;
+        createOTATask();
+        return;
+    } else if (message.startsWith("ota ")) {
+        String link = message.substring(4);
+        link.trim();
+        if (link.startsWith("http://") || link.startsWith("https://")) {
+            firmwareUrl = link;
+            createOTATask();
+            return;
+        }
     }
     
 
@@ -1395,13 +1495,12 @@ void publishHeartbeat() {
     bool wifiActive = false;
     bool gsmActive = true;
     bool ModeArm = true;
-    #define VERSION "1.501"
 
     String payload = String(DEVICE_ID) + ",W:" + (wifiActive ? "1" : "0") + 
                         ",G:" + (gsmActive ? "1" : "0") + 
                         ",C:" + (acLine ? "1" : "0") + 
                         ",M:" + (ModeArm ? "1" : "0") + 
-                        ",V:" + VERSION;
+                        ",V:" + FW_VERSION;
     Serial.println(payload);
     snprintf(hbMsg.payload, sizeof(hbMsg.payload), "%s", payload.c_str());
     
