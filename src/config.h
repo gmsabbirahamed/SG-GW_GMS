@@ -8,17 +8,20 @@
 #include <esp_task_wdt.h>
 
 // ==================== Configuration ====================
-#define OTA 1  // Set to 1 for OTA mode, 0 for normal mode
+#define OTA 0  // Set to 1 for OTA mode, 0 for normal mode
 #define HW_VERSION "3.0"
-#define FW_VERSION "V1.502"
+#define FW_VERSION "V1.603"
 #define OTA_DATE "260101"
 
-#define WORK_PACKAGE "1102"
+#define WORK_PACKAGE "1191"
 #define DEVICE_TYPE "03"
 #define DEVICE_CODE_UPLOAD_DATE "250616"
 #define DEVICE_SERIAL_ID "0117"
 
 #define UNIQUE_DEVICE_ID WORK_PACKAGE DEVICE_TYPE DEVICE_CODE_UPLOAD_DATE DEVICE_SERIAL_ID
+
+//Duplicalte from gsm.h for global access
+QueueHandle_t mqttPublishQueue = NULL;
 
 
 
@@ -43,7 +46,7 @@ String MAC_FALLBACK_ID = "";
 #define OFF LOW
 
 // Timing Configuration
-const unsigned long HEARTBEAT_INTERVAL = 60000UL;
+const unsigned long HEARTBEAT_INTERVAL = 5 * 60000UL;
 const unsigned long GSM_ERROR_RETRY_DELAY = 10000UL;
 unsigned long lastHeartbeat = 0;
 unsigned long lastGsmErrorTime = 0;
@@ -58,10 +61,21 @@ volatile bool otaInProgress = false;
 volatile bool tasksSuspended = false;
 bool modemWasInitialized = false;
 
+
 // ==================== Global Variables ====================
-const char* pubTopic = "DMA/SG/PUB";
-const char* subTopic = "DMA/SG/";
-const char* hbTopic = "DMA/SG/PUB";
+const char* MQTT_EM_HB = "DMA/EM/HB";
+const char* MQTT_EM_PUB = "DMA/EM/PUB";
+const char* MQTT_AC_HB = "DMA/MeshAC/HB";
+const char* MQTT_AC_SUB = "DMA/MeshAC/SUB/";
+const char* MQTT_AC_ACK = "DMA/MeshAC/ACK";
+const char* MQTT_AC_TMP = "DMA/MeshAC/TEMP";
+
+// const char* pubTopic = "DMA/MeshAC/PUB";
+// const char* subTopic = "DMA/MeshAC/SUB";
+// const char* hbTopic = "DMA/MeshAC/HB";
+// const char* MQTT_AC_ACK = "DMA/MeshAC/ACK";
+// const char* MQTT_AC_HB = "DMA/MeshAC/HB";
+// const char* MQTT_AC_TMP = "DMA/MeshAC/TMP";
 
 struct MQTTMessage {
     char topic[50];

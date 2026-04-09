@@ -36,7 +36,7 @@ TaskHandle_t networkTaskHandle = NULL;
 TaskHandle_t otaTaskHandle = NULL;
 
 //Queue Handles
-QueueHandle_t mqttPublishQueue = NULL;
+// QueueHandle_t mqttPublishQueue = NULL;
 
 // Mutexes Handles
 SemaphoreHandle_t mqttMutex = NULL;
@@ -210,7 +210,7 @@ bool connectToMQTT() {
 
     if (connected) {
         SerialMon.println("NetworkTask: MQTT connected");
-        String fullSubTopic = subTopic + DEVICE_ID;
+        String fullSubTopic = MQTT_AC_SUB + DEVICE_ID;
         mqtt.subscribe(fullSubTopic.c_str());
         SerialMon.printf("NetworkTask: Subscribed to: %s\n", fullSubTopic.c_str());
     } else {

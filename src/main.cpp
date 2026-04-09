@@ -2,6 +2,8 @@
 #include "gsm.h"
 #include "led.h"
 #include "button.h"
+#include "mesh_gw.h"
+// #include "energy_meter.h"
 
 Preferences preferences;
 
@@ -78,6 +80,7 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonISR, CHANGE);
 
     Button_setup();
+    mesh_gw_setup();
 
     // Create tasks
     xTaskCreatePinnedToCore(mainTask, "MainTask", MAIN_TASK_STACK, NULL, MAIN_TASK_PRIORITY, &mainTaskHandle, 1);
@@ -116,7 +119,9 @@ void mainTask(void* parameter) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
+//================================================================
 
+// ==================== MQTT Callback ====================
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
     sendLedCommand(LED_MQTT_RECEIVE);
     String message;
@@ -132,11 +137,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     Serial.println(message);
     Serial.println("==========================================\n");
 
+    message.trim();           // Removes leading/trailing whitespace
+    message.replace(" ", ""); // Removes all internal spaces
+    Serial.println("📥 Message: " + message);
+
     if(message == "ping") {
         Serial.println("MQTT Command: Ping received");
         MQTTMessage response;
-        snprintf(response.topic, sizeof(response.topic), "%s", pubTopic);
-        snprintf(response.payload, sizeof(response.payload), "%s,%d", DEVICE_ID.c_str(), modem.getSignalQuality());
+        snprintf(response.topic, sizeof(response.topic), "%s", MQTT_AC_ACK);
+        snprintf(response.payload, sizeof(response.payload), "%s,%s,%d", DEVICE_ID.c_str(),"gsm_connected", modem.getSignalQuality());
         sendLedCommand(LED_PING_ACK);
         xQueueSend(mqttPublishQueue, &response, pdMS_TO_TICKS(100));
         return;
@@ -162,13 +171,33 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
             return;
         }
     }
+    //============================================================
+    int commaIndex = message.indexOf(',');
+    if (commaIndex < 0) {
+        Serial.println("⚠️ Format: node_id,command");
+        // LedBlink cmdErrorBlink = {CRGB::Orange, 150, 2, 150};  // on_duraton, repeat, gap_duration
+        // xQueueSend(ledQueue, &cmdErrorBlink, 0);
+        return;
+    }
+
+    Message msg;
+    msg.sender_id = Local_ID;
+    msg.receiver_id = message.substring(0, commaIndex);
+    msg.command = message.substring(commaIndex + 1);
+    msg.type = "cmd";
+    msg.msg_id = generateMessageID();
+
+    String payload2 = msg.sender_id + "," + msg.receiver_id + "," + msg.command + "," + msg.type + "," + msg.msg_id;
+    esp_now_send(broadcastAddress, (uint8_t*)payload2.c_str(), payload2.length());
+    Serial.println("📤 CMD Sent: " + payload2);
     
 }
+//==================================================================
 
-//1102032505280029,W:1,G:1,C:1,M:1,V:1.472
+// HB = 1191032506160004,W:0,G:1,C:1,SD:0
 void publishHeartbeat() {
     MQTTMessage hbMsg;
-    snprintf(hbMsg.topic, sizeof(hbMsg.topic), "%s", hbTopic);
+    snprintf(hbMsg.topic, sizeof(hbMsg.topic), "%s", MQTT_EM_HB);
     uint8_t rssi = modem.getSignalQuality();
     int health = ESP.getFreeHeap();
     int uptime_m = millis() / 60000;
@@ -177,13 +206,12 @@ void publishHeartbeat() {
     bool acLine = digitalRead(ACLINE_PIN) == HIGH ? true : false;
     bool wifiActive = false;
     bool gsmActive = true;
-    bool ModeArm = true;
+    bool use_sd_card = false;
 
     String payload = String(DEVICE_ID) + ",W:" + (wifiActive ? "1" : "0") + 
                         ",G:" + (gsmActive ? "1" : "0") + 
                         ",C:" + (acLine ? "1" : "0") + 
-                        ",M:" + (ModeArm ? "1" : "0") + 
-                        ",V:" + FW_VERSION;
+                        ",SD:" + (use_sd_card ? "1" : "0");
     Serial.println(payload);
     snprintf(hbMsg.payload, sizeof(hbMsg.payload), "%s", payload.c_str());
     
