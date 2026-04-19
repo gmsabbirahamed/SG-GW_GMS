@@ -69,6 +69,11 @@ void setup() {
     SerialMon.println("Final Device ID: " + DEVICE_ID);
     SerialMon.println("=================================\n");
 
+    preferences.begin("device_config", false);
+    deviceArmed = preferences.getBool("armed", true);
+    SerialMon.println("Device Armed?: " + String(deviceArmed ? "Yes" : "No"));
+    preferences.end();
+
     GSM_setup();
 
     mqttPublishQueue = xQueueCreate(MQTT_PUB_QUEUE_SIZE, sizeof(MQTTMessage));
@@ -151,6 +156,30 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         return;
     }
 
+    if(message == "arm:1") {
+        Serial.println("MQTT Command: Arm device");
+        deviceArmed = true;
+
+        preferences.begin("device_config", false);
+        preferences.putBool("armed", true);
+        SerialMon.println("Device Armed?: " + String(deviceArmed ? "Yes" : "No"));
+        preferences.end();
+
+        return;
+    }
+
+    if(message == "arm:0") {
+        Serial.println("MQTT Command: Disarm device");
+        deviceArmed = false;
+
+        preferences.begin("device_config", false);
+        preferences.putBool("armed", false);
+        SerialMon.println("Device Armed?: " + String(deviceArmed ? "Yes" : "No"));
+        preferences.end();
+
+        return;
+    }
+
     else if(message.startsWith("ota")) {
         Serial.println("MQTT Command: OTA update received");
         firmwareUrl = defaultFirmwareUrl;
@@ -171,6 +200,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
             return;
         }
     }
+    
     //============================================================
     int commaIndex = message.indexOf(',');
     if (commaIndex < 0) {
@@ -186,6 +216,11 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     msg.command = message.substring(commaIndex + 1);
     msg.type = "cmd";
     msg.msg_id = generateMessageID();
+
+    if(deviceArmed == false) {
+        Serial.println("⚠️ Device is not armed. Command execution blocked.");
+        return;
+    }
 
     String payload2 = msg.sender_id + "," + msg.receiver_id + "," + msg.command + "," + msg.type + "," + msg.msg_id;
     esp_now_send(broadcastAddress, (uint8_t*)payload2.c_str(), payload2.length());

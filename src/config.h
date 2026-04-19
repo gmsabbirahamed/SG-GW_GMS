@@ -20,10 +20,10 @@
 
 #define UNIQUE_DEVICE_ID WORK_PACKAGE DEVICE_TYPE DEVICE_CODE_UPLOAD_DATE DEVICE_SERIAL_ID
 
+bool deviceArmed = true;  // Default to armed, can be changed via MQTT command
+
 //Duplicalte from gsm.h for global access
 QueueHandle_t mqttPublishQueue = NULL;
-
-
 
 String DEVICE_ID = "";
 String MAC_FALLBACK_ID = "";
