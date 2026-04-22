@@ -72,14 +72,14 @@ Author: Sabbir Ahamed
 // ==================== Configuration ====================
 #define WORK_PACKAGE "1102"
 #define DEVICE_TYPE "03"
-#define DEVICE_CODE_UPLOAD_DATE "250528"
-#define DEVICE_SERIAL_ID "0063"
+#define DEVICE_CODE_UPLOAD_DATE "151111"
+#define DEVICE_SERIAL_ID "0032"  // Change this for each device (e.g., 0001, 0002, etc.)
 
 #define UNIQUE_DEVICE_ID WORK_PACKAGE DEVICE_TYPE DEVICE_CODE_UPLOAD_DATE DEVICE_SERIAL_ID
 
-#define HORN_MODE 1  // 1 WIred, 0 Wireless
-#define OTA 1  // Set to 1 for OTA mode, 0 for normal mode
-#define HW_VERSION "3.1"
+#define HORN_MODE 0  // 1 WIred, 0 Wireless
+#define OTA 1// Set to 1 for OTA mode, 0 for normal mode
+#define HW_VERSION "3.0"
 #define FW_VERSION "V1.502"
 #define OTA_DATE "260101"
 
