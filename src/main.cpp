@@ -72,7 +72,7 @@ Author: Sabbir Ahamed
 // ==================== Configuration ====================
 #define WORK_PACKAGE "1102"
 #define DEVICE_TYPE "03"
-#define DEVICE_CODE_UPLOAD_DATE "151111"
+#define DEVICE_CODE_UPLOAD_DATE "251111"
 #define DEVICE_SERIAL_ID "0032"  // Change this for each device (e.g., 0001, 0002, etc.)
 
 #define UNIQUE_DEVICE_ID WORK_PACKAGE DEVICE_TYPE DEVICE_CODE_UPLOAD_DATE DEVICE_SERIAL_ID
