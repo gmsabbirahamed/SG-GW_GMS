@@ -258,6 +258,7 @@ struct ButtonEvent {
 const char* pubTopic = "DMA/SG/PUB";
 const char* subTopic = "DMA/SG/";
 const char* hbTopic = "DMA/SG/PUB";
+const char*ackTopic = "DMA/SG/ACK";
 
 // System State
 volatile bool mqttConnected = false;
@@ -473,7 +474,7 @@ void networkTask(void* parameter) {
     // MQTT configuration
     mqtt.setServer(broker, 1883);
     mqtt.setKeepAlive(30);
-    // mqtt.setSocketTimeout(10);
+    mqtt.setSocketTimeout(5);
     mqtt.setCallback(mqttCallback);
 
     SerialMon.println("Network Task started");
@@ -1308,13 +1309,17 @@ bool connectToMQTT() {
     if (!connected) {
         connected = mqtt.connect(clientId.c_str(), mqttUser, mqttPass);
     }
-    // for(int i = 0; i < 5 && !connected; i++) {
-    //     SerialMon.printf("NetworkTask: MQTT initial connect retry %d\n", i+1);
-    //     if (!connected) {
-    //         connected = mqtt.connect(clientId.c_str(), mqttUser, mqttPass);
-    //     }
-    //     vTaskDelay(pdMS_TO_TICKS(500));
-    // }
+
+    for(int i = 0; i < 15 && !connected; i++) {
+        SerialMon.printf("NetworkTask: MQTT initial connect retry %d\n", i+1);
+        if (!connected) {
+            connected = mqtt.connect(clientId.c_str(), mqttUser, mqttPass);
+        }
+        else{
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
 
     if (connected) {
         SerialMon.println("NetworkTask: MQTT connected");
@@ -1323,7 +1328,7 @@ bool connectToMQTT() {
         SerialMon.printf("NetworkTask: Subscribed to: %s\n", fullSubTopic.c_str());
     } else {
         Serial.printf("MQTT Connect failed (%d %s)\n", 
-                      mqtt.state(), mqttStateToText(mqtt.state()).c_str());
+                        mqtt.state(), mqttStateToText(mqtt.state()).c_str());
     }
 
     return connected;
@@ -1384,6 +1389,51 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         sendLedCommand(LED_PING_ACK);
         xQueueSend(mqttPublishQueue, &response, pdMS_TO_TICKS(100));
         return;
+    }
+
+    if(message == "get_sim_info"){
+        String operatorCode = modem.getOperator();
+        String operatorName = operatorCode;
+
+        // Convert operator code to readable name
+        if (operatorCode == "47001") {
+            operatorName = "Grameenphone";
+        }
+        else if (operatorCode == "47002") {
+            operatorName = "Robi";
+        }
+        else if (operatorCode == "47003") {
+            operatorName = "Banglalink";
+        }
+        else if (operatorCode == "47004") {
+            operatorName = "Teletalk";
+        }
+
+        Serial.print("Operator: ");
+        Serial.println(operatorName);
+
+
+        // ================= IMSI =================
+
+        String imsi = modem.getIMSI();
+
+        // Last 8 digit only
+        String simID = "";
+
+        if (imsi.length() >= 8) {
+            simID = imsi.substring(imsi.length() - 8);
+        }
+
+        Serial.print("SIM ID: ");
+        Serial.println(simID);
+
+        MQTTMessage response2;
+        snprintf(response2.topic, sizeof(response2.topic), "%s", ackTopic);
+        snprintf(response2.payload, sizeof(response2.payload), "%s,%s,%s", DEVICE_ID.c_str(),operatorName, simID);
+        sendLedCommand(LED_PING_ACK);
+        xQueueSend(mqttPublishQueue, &response2, pdMS_TO_TICKS(100));
+        return;
+
     }
 
     else if(message.startsWith("ota")) {
