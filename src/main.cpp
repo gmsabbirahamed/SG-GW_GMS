@@ -2,7 +2,6 @@
 #include "gsm.h"
 #include "led.h"
 #include "button.h"
-#include "mesh_gw.h"
 // #include "energy_meter.h"
 
 Preferences preferences;
@@ -85,7 +84,6 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonISR, CHANGE);
 
     Button_setup();
-    mesh_gw_setup();
 
     // Create tasks
     xTaskCreatePinnedToCore(mainTask, "MainTask", MAIN_TASK_STACK, NULL, MAIN_TASK_PRIORITY, &mainTaskHandle, 1);
@@ -156,6 +154,51 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         return;
     }
 
+    if(message == "get_sim_info"){
+        String operatorCode = modem.getOperator();
+        String operatorName = operatorCode;
+
+        // Convert operator code to readable name
+        if (operatorCode == "47001") {
+            operatorName = "Grameenphone";
+        }
+        else if (operatorCode == "47002") {
+            operatorName = "Robi";
+        }
+        else if (operatorCode == "47003") {
+            operatorName = "Banglalink";
+        }
+        else if (operatorCode == "47004") {
+            operatorName = "Teletalk";
+        }
+
+        Serial.print("Operator: ");
+        Serial.println(operatorName);
+
+
+        // ================= IMSI =================
+
+        String imsi = modem.getIMSI();
+
+        // Last 8 digit only
+        String simID = "";
+
+        if (imsi.length() >= 8) {
+            simID = imsi.substring(imsi.length() - 8);
+        }
+
+        Serial.print("SIM ID: ");
+        Serial.println(simID);
+
+        MQTTMessage response2;
+        snprintf(response2.topic, sizeof(response2.topic), "%s", MQTT_AC_ACK);
+        snprintf(response2.payload, sizeof(response2.payload), "%s,%s,%s", DEVICE_ID.c_str(),operatorName, simID);
+        sendLedCommand(LED_PING_ACK);
+        xQueueSend(mqttPublishQueue, &response2, pdMS_TO_TICKS(100));
+        return;
+
+    }
+
     if(message == "arm:1") {
         Serial.println("MQTT Command: Arm device");
         deviceArmed = true;
@@ -202,29 +245,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
     
     //============================================================
-    int commaIndex = message.indexOf(',');
-    if (commaIndex < 0) {
-        Serial.println("⚠️ Format: node_id,command");
-        // LedBlink cmdErrorBlink = {CRGB::Orange, 150, 2, 150};  // on_duraton, repeat, gap_duration
-        // xQueueSend(ledQueue, &cmdErrorBlink, 0);
-        return;
-    }
-
-    Message msg;
-    msg.sender_id = Local_ID;
-    msg.receiver_id = message.substring(0, commaIndex);
-    msg.command = message.substring(commaIndex + 1);
-    msg.type = "cmd";
-    msg.msg_id = generateMessageID();
-
-    if(deviceArmed == false) {
-        Serial.println("⚠️ Device is not armed. Command execution blocked.");
-        return;
-    }
-
-    String payload2 = msg.sender_id + "," + msg.receiver_id + "," + msg.command + "," + msg.type + "," + msg.msg_id;
-    esp_now_send(broadcastAddress, (uint8_t*)payload2.c_str(), payload2.length());
-    Serial.println("📤 CMD Sent: " + payload2);
+    
     
 }
 //==================================================================
