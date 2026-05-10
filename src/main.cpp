@@ -3,7 +3,7 @@
 #include "led.h"
 #include "button.h"
 #include "mesh_gw.h"
-// #include "energy_meter.h"
+#include "energy_meter.h"
 
 Preferences preferences;
 
@@ -17,12 +17,13 @@ TaskHandle_t mainTaskHandle = NULL;
 #define MAIN_TASK_PRIORITY 2
 
 // Main Task stack sizes
-#define MAIN_TASK_STACK 4096
+#define MAIN_TASK_STACK 8 * 1024
 
 // Queue sizes
 #define MQTT_PUB_QUEUE_SIZE 20
 
 //Function prototypes
+void publishEnergyData();
 void mainTask(void* parameter);
 
 // ==================== Setup ====================
@@ -50,18 +51,18 @@ void setup() {
 
     // Read or set Device ID
     #if OTA
-        preferences.begin("device", true);
-        DEVICE_ID = preferences.getString("DID", MAC_FALLBACK_ID);
+        preferences.begin("device_data", true);
+        DEVICE_ID = preferences.getString("device_id", MAC_FALLBACK_ID);
         preferences.end();
         SerialMon.println("[OTA MODE] Read-only mode: DEVICE_ID = " + DEVICE_ID);
     #else
-        preferences.begin("device", false);
-        DEVICE_ID = preferences.getString("DID", "");
+        preferences.begin("device_data", false);
+        DEVICE_ID = preferences.getString("device_id", "");
 
         if (DEVICE_ID.isEmpty() || DEVICE_ID != UNIQUE_DEVICE_ID) {
             SerialMon.println("[NORMAL MODE] Invalid or missing ID. Writing new ID...");
             DEVICE_ID = UNIQUE_DEVICE_ID;
-            preferences.putString("DID", DEVICE_ID);
+            preferences.putString("device_id", DEVICE_ID);
         }
         preferences.end();
     #endif
@@ -86,6 +87,7 @@ void setup() {
 
     Button_setup();
     mesh_gw_setup();
+    energy_meter_setup();
 
     // Create tasks
     xTaskCreatePinnedToCore(mainTask, "MainTask", MAIN_TASK_STACK, NULL, MAIN_TASK_PRIORITY, &mainTaskHandle, 1);
@@ -116,7 +118,8 @@ void mainTask(void* parameter) {
         if (millis() - lastHeartbeatTime >= HEARTBEAT_INTERVAL) {
             if (deviceOnline) {
                 publishHeartbeat();
-                sendLedCommand(LED_HEARTBEAT);
+                vTaskDelay(pdMS_TO_TICKS(250));
+                publishEnergyData();
                 lastHeartbeatTime = millis();
             }
         }
@@ -210,6 +213,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         SerialMon.println("Device Armed?: " + String(deviceArmed ? "Yes" : "No"));
         preferences.end();
 
+        sendLedCommand(LED_PING_ACK);
+
         return;
     }
 
@@ -222,6 +227,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         SerialMon.println("Device Armed?: " + String(deviceArmed ? "Yes" : "No"));
         preferences.end();
 
+        sendLedCommand(LED_DISARMED);
         return;
     }
 
@@ -255,17 +261,18 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         return;
     }
 
+    if(deviceArmed == false) {
+        Serial.println("⚠️ Device is not armed. Command execution blocked.");
+        sendLedCommand(LED_DISARMED);
+        return;
+    }
+
     Message msg;
     msg.sender_id = Local_ID;
     msg.receiver_id = message.substring(0, commaIndex);
     msg.command = message.substring(commaIndex + 1);
     msg.type = "cmd";
     msg.msg_id = generateMessageID();
-
-    if(deviceArmed == false) {
-        Serial.println("⚠️ Device is not armed. Command execution blocked.");
-        return;
-    }
 
     String payload2 = msg.sender_id + "," + msg.receiver_id + "," + msg.command + "," + msg.type + "," + msg.msg_id;
     esp_now_send(broadcastAddress, (uint8_t*)payload2.c_str(), payload2.length());
@@ -274,10 +281,26 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 }
 //==================================================================
 
+//=====================================================//
+void publishEnergyData(){
+    getModbusData();
+    ParsingModbusData();
+
+    SerialMon.println(em_data);
+
+    MQTTMessage emMsg;
+    snprintf(emMsg.topic, sizeof(emMsg.topic), "%s", MQTT_EM_PUB);
+    snprintf(emMsg.payload, sizeof(emMsg.payload), "%s", em_data);
+    
+    if (xQueueSend(mqttPublishQueue, &emMsg, pdMS_TO_TICKS(100)) == pdTRUE) {
+        SerialMon.println("MainTask: Heartbeat queued");
+    }
+
+    sendLedCommand(LED_PUBLISH_EM);
+}
+
 // HB = 1191032506160004,W:0,G:1,C:1,SD:0
 void publishHeartbeat() {
-    MQTTMessage hbMsg;
-    snprintf(hbMsg.topic, sizeof(hbMsg.topic), "%s", MQTT_EM_HB);
     uint8_t rssi = modem.getSignalQuality();
     int health = ESP.getFreeHeap();
     int uptime_m = millis() / 60000;
@@ -293,11 +316,28 @@ void publishHeartbeat() {
                         ",C:" + (acLine ? "1" : "0") + 
                         ",SD:" + (use_sd_card ? "1" : "0");
     Serial.println(payload);
-    snprintf(hbMsg.payload, sizeof(hbMsg.payload), "%s", payload.c_str());
+
+    //Heartbeat for EnergyMeter
+    MQTTMessage emHbMsg;
+    snprintf(emHbMsg.topic, sizeof(emHbMsg.topic), "%s", MQTT_EM_HB);
+    snprintf(emHbMsg.payload, sizeof(emHbMsg.payload), "%s", payload.c_str());
     
-    if (xQueueSend(mqttPublishQueue, &hbMsg, pdMS_TO_TICKS(100)) == pdTRUE) {
-        SerialMon.println("MainTask: Heartbeat queued");
+    if (xQueueSend(mqttPublishQueue, &emHbMsg, pdMS_TO_TICKS(100)) == pdTRUE) {
+        SerialMon.println("MainTask: Energy Meter Heartbeat queued");
     }
+
+    vTaskDelay(pdMS_TO_TICKS(250));
+
+    //Heartbeat for AC Automation
+    MQTTMessage acHbMsg;
+    snprintf(acHbMsg.topic, sizeof(acHbMsg.topic), "%s", MQTT_AC_GW_HB);
+    snprintf(acHbMsg.payload, sizeof(acHbMsg.payload), "%s", payload.c_str());
+    
+    if (xQueueSend(mqttPublishQueue, &acHbMsg, pdMS_TO_TICKS(100)) == pdTRUE) {
+        SerialMon.println("MainTask: AC Heartbeat queued");
+    }
+
+    sendLedCommand(LED_HEARTBEAT);
 }
 
 // ==================== Helper Functions ====================

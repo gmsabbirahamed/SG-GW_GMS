@@ -29,7 +29,7 @@ const char* mqttPass = "Secret!@#$1234";
 
 String firmwareUrl = "";
 // const char* defaultFirmwareUrl = "http://ota.gmsabbirahamed.com/esp32/firmware/blink/firmware.bin";
-const char* defaultFirmwareUrl = "http://iot2.dma-bd.com:5000/download/iotsecurityv3101.bin";
+const char* defaultFirmwareUrl = "http://iot2.dma-bd.com:5000/download/acautomationv1201.bin";
 
 //Task Handles
 TaskHandle_t networkTaskHandle = NULL;

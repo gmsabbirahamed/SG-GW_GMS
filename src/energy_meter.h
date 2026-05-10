@@ -7,7 +7,7 @@
 #define USE_SD_CARD false
 #define USE_ENERGY_METER
 #define USE_SELEC_MFM384 // Uncomment to use Selec MFM384 3-phase meter
-//#define USE_DZ81_DZS500 // Uncomment to use DZS500 3-phase meter
+// #define USE_DZ81_DZS500 // Uncomment to use DZS500 3-phase meter
 
 // RS485 Serial2 Pins
 #define RS485_RX 27
@@ -180,7 +180,7 @@ ModbusMaster node;
     // Format the data into the buffer with DEVICE_ID at the beginning
     snprintf(em_data, sizeof(em_data), 
             "%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f",
-            DEVICE_ID,  // DEVICE_ID
+            DEVICE_ID.c_str(),  // DEVICE_ID
             tNetEnergy,
             tImpEnergy,
             activePower,
@@ -230,7 +230,7 @@ ModbusMaster node;
         // Format the final MQTT message string
         snprintf(em_data, sizeof(em_data),
         "%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f",
-        DEVICE_ID,
+        DEVICE_ID.c_str(),
         totaltNetEnergy, tImpEnergy, ap,
         va, vb, vc,
         vab, vbc, vca,

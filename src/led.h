@@ -16,16 +16,15 @@ enum LedCommandType {
     LED_ONLINE,
     LED_RF_DETECT,
     LED_HEARTBEAT,
-    LED_PUBLISH_RF,
+    LED_PUBLISH_EM,
     LED_MQTT_RECEIVE,
+    LED_DISARMED,
     LED_BUTTON_PRESS,
     LED_BUTTON_HOLD_3SEC,
     LED_BUTTON_HOLD_5SEC,
     LED_BUTTON_HOLD_10SEC,
     LED_OTA_IN_PROGRESS,
-    LED_PING_ACK,
-    LED_ALARM_ON,
-    LED_ALARM_OFF
+    LED_PING_ACK
 };
 
 TaskHandle_t ledTaskHandle = NULL;
@@ -165,7 +164,7 @@ void ledTask(void* parameter) {
                 }
                 break;
                 
-            case LED_PUBLISH_RF:
+            case LED_PUBLISH_EM:
                 // Single green blink
                 leds[0] = CRGB::Green;
                 FastLED.show();
@@ -193,6 +192,29 @@ void ledTask(void* parameter) {
                 leds[0] = CRGB::Blue;
                 FastLED.show();
                 vTaskDelay(pdMS_TO_TICKS(200));
+                leds[0] = CRGB::Black;
+                FastLED.show();
+                // Return to previous state
+                if (deviceOnline) {
+                    currentCommand.type = LED_ONLINE;
+                } else if (gprsConnected) {
+                    currentCommand.type = LED_CONNECTING;
+                } else {
+                    currentCommand.type = LED_OFFLINE;
+                }
+                break;
+
+            case LED_DISARMED:
+                // Green flash
+                leds[0] = CRGB::DeepPink;
+                FastLED.show();
+                vTaskDelay(pdMS_TO_TICKS(100));
+                leds[0] = CRGB::Black;
+                FastLED.show();
+                vTaskDelay(pdMS_TO_TICKS(100));
+                leds[0] = CRGB::DeepPink;
+                FastLED.show();
+                vTaskDelay(pdMS_TO_TICKS(100));
                 leds[0] = CRGB::Black;
                 FastLED.show();
                 // Return to previous state
@@ -256,39 +278,6 @@ void ledTask(void* parameter) {
                 }
                 break;
 
-            case LED_ALARM_ON:
-                // Solid orange
-                leds[0] = CRGB::Orange;
-                FastLED.show();
-                vTaskDelay(pdMS_TO_TICKS(500));
-                leds[0] = CRGB::Black;
-                FastLED.show();
-                // Return to previous state
-                if (deviceOnline) {
-                    currentCommand.type = LED_ONLINE;
-                } else if (gprsConnected) {
-                    currentCommand.type = LED_CONNECTING;
-                } else {
-                    currentCommand.type = LED_OFFLINE;
-                }
-                break;
-                
-            case LED_ALARM_OFF:
-                // SkyBlue
-                leds[0] = CRGB::SkyBlue;
-                FastLED.show();
-                vTaskDelay(pdMS_TO_TICKS(250));
-                leds[0] = CRGB::Black;
-                FastLED.show();
-                // Return to previous state
-                if (deviceOnline) {
-                    currentCommand.type = LED_ONLINE;
-                } else if (gprsConnected) {
-                    currentCommand.type = LED_CONNECTING;
-                } else {
-                    currentCommand.type = LED_OFFLINE;
-                }
-                break;
         }
         
         FastLED.show();
