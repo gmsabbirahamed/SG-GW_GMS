@@ -200,13 +200,17 @@ bool connectToMQTT() {
     if (!connected) {
         connected = mqtt.connect(clientId.c_str(), mqttUser, mqttPass);
     }
-    // for(int i = 0; i < 5 && !connected; i++) {
-    //     SerialMon.printf("NetworkTask: MQTT initial connect retry %d\n", i+1);
-    //     if (!connected) {
-    //         connected = mqtt.connect(clientId.c_str(), mqttUser, mqttPass);
-    //     }
-    //     vTaskDelay(pdMS_TO_TICKS(500));
-    // }
+
+    for(int i = 0; i < 15 && !connected; i++) {
+        SerialMon.printf("NetworkTask: MQTT initial connect retry %d\n", i+1);
+        if (!connected) {
+            connected = mqtt.connect(clientId.c_str(), mqttUser, mqttPass);
+        }
+        else{
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
 
     if (connected) {
         SerialMon.println("NetworkTask: MQTT connected");
@@ -225,7 +229,7 @@ void networkTask(void* parameter) {
     // MQTT configuration
     mqtt.setServer(broker, 1883);
     mqtt.setKeepAlive(30);
-    // mqtt.setSocketTimeout(10);
+    mqtt.setSocketTimeout(5);
     mqtt.setCallback(mqttCallback);
 
     SerialMon.println("Network Task started");

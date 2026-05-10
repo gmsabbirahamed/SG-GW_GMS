@@ -156,6 +156,51 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         return;
     }
 
+    if(message == "get_sim_info"){
+        String operatorCode = modem.getOperator();
+        String operatorName = operatorCode;
+
+        // Convert operator code to readable name
+        if (operatorCode == "47001") {
+            operatorName = "Grameenphone";
+        }
+        else if (operatorCode == "47002") {
+            operatorName = "Robi";
+        }
+        else if (operatorCode == "47003") {
+            operatorName = "Banglalink";
+        }
+        else if (operatorCode == "47004") {
+            operatorName = "Teletalk";
+        }
+
+        Serial.print("Operator: ");
+        Serial.println(operatorName);
+
+
+        // ================= IMSI =================
+
+        String imsi = modem.getIMSI();
+
+        // Last 8 digit only
+        String simID = "";
+
+        if (imsi.length() >= 8) {
+            simID = imsi.substring(imsi.length() - 8);
+        }
+
+        Serial.print("SIM ID: ");
+        Serial.println(simID);
+
+        MQTTMessage response2;
+        snprintf(response2.topic, sizeof(response2.topic), "%s", MQTT_AC_ACK);
+        snprintf(response2.payload, sizeof(response2.payload), "%s,%s,%s", DEVICE_ID.c_str(),operatorName, simID);
+        sendLedCommand(LED_PING_ACK);
+        xQueueSend(mqttPublishQueue, &response2, pdMS_TO_TICKS(100));
+        return;
+
+    }
+
     if(message == "arm:1") {
         Serial.println("MQTT Command: Arm device");
         deviceArmed = true;
