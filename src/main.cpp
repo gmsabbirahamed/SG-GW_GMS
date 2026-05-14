@@ -32,7 +32,7 @@ void setup() {
     delay(100);
 
     SerialMon.println("\n====================================");
-    SerialMon.println("  ==    DMA IoT Security GATEWAY    ==");
+    SerialMon.println("  ==    DMA IoT AC Automation GATEWAY    ==");
     SerialMon.println("--------------------------------------");
     SerialMon.printf ("  ==      FW Version: %s        ==", FW_VERSION);
     SerialMon.println();
@@ -118,8 +118,10 @@ void mainTask(void* parameter) {
         if (millis() - lastHeartbeatTime >= HEARTBEAT_INTERVAL) {
             if (deviceOnline) {
                 publishHeartbeat();
+                #ifdef USE_ENERGY_METER
                 vTaskDelay(pdMS_TO_TICKS(250));
-                publishEnergyData();
+                    publishEnergyData();
+                #endif
                 lastHeartbeatTime = millis();
             }
         }
@@ -282,22 +284,24 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 //==================================================================
 
 //=====================================================//
-void publishEnergyData(){
-    getModbusData();
-    ParsingModbusData();
+#ifdef USE_ENERGY_METER
+    void publishEnergyData(){
+        getModbusData();
+        ParsingModbusData();
 
-    SerialMon.println(em_data);
+        SerialMon.println(em_data);
 
-    MQTTMessage emMsg;
-    snprintf(emMsg.topic, sizeof(emMsg.topic), "%s", MQTT_EM_PUB);
-    snprintf(emMsg.payload, sizeof(emMsg.payload), "%s", em_data);
-    
-    if (xQueueSend(mqttPublishQueue, &emMsg, pdMS_TO_TICKS(100)) == pdTRUE) {
-        SerialMon.println("MainTask: Heartbeat queued");
+        MQTTMessage emMsg;
+        snprintf(emMsg.topic, sizeof(emMsg.topic), "%s", MQTT_EM_PUB);
+        snprintf(emMsg.payload, sizeof(emMsg.payload), "%s", em_data);
+        
+        if (xQueueSend(mqttPublishQueue, &emMsg, pdMS_TO_TICKS(100)) == pdTRUE) {
+            SerialMon.println("MainTask: Heartbeat queued");
+        }
+
+        sendLedCommand(LED_PUBLISH_EM);
     }
-
-    sendLedCommand(LED_PUBLISH_EM);
-}
+#endif
 
 // HB = 1191032506160004,W:0,G:1,C:1,SD:0
 void publishHeartbeat() {

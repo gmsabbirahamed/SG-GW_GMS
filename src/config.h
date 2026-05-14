@@ -71,16 +71,9 @@ const char* MQTT_AC_SUB = "DMA/MeshAC/SUB/";
 const char* MQTT_AC_ACK = "DMA/MeshAC/ACK";
 const char* MQTT_AC_TMP = "DMA/MeshAC/TEMP";
 
-// const char* pubTopic = "DMA/MeshAC/PUB";
-// const char* subTopic = "DMA/MeshAC/SUB";
-// const char* hbTopic = "DMA/MeshAC/HB";
-// const char* MQTT_AC_ACK = "DMA/MeshAC/ACK";
-// const char* MQTT_AC_HB = "DMA/MeshAC/HB";
-// const char* MQTT_AC_TMP = "DMA/MeshAC/TMP";
-
 struct MQTTMessage {
     char topic[50];
-    char payload[100];
+    char payload[128];
 };
 
 // Helper functions
