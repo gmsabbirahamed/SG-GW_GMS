@@ -27,8 +27,8 @@
 
 #define HORN_MODE 1  // 1 WIred, 0 Wireless
 #define OTA 0// Set to 1 for OTA mode, 0 for normal mode
-#define HW_VERSION "3.0"
-#define FW_VERSION "V1.502"
+#define HW_VERSION "3.1"
+#define FW_VERSION "V1.503"
 #define OTA_DATE "260101"
 
 String DEVICE_ID = "";
@@ -1439,7 +1439,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     else if(message == "ping") {
         Serial.println("MQTT Command: Ping received");
         MQTTMessage response;
-        snprintf(response.topic, sizeof(response.topic), "%s", pubTopic);
+        snprintf(response.topic, sizeof(response.topic), "%s", ackTopic);
         snprintf(response.payload, sizeof(response.payload), "%s,%d", DEVICE_ID.c_str(), modem.getSignalQuality());
         sendLedCommand(LED_PING_ACK);
         xQueueSend(mqttPublishQueue, &response, pdMS_TO_TICKS(100));
