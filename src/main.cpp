@@ -73,12 +73,12 @@ Author: Sabbir Ahamed
 #define WORK_PACKAGE "1102"
 #define DEVICE_TYPE "03"
 #define DEVICE_CODE_UPLOAD_DATE "260310"
-#define DEVICE_SERIAL_ID "0054"  // Change this for each device (e.g., 0001, 0002, etc.)  
+#define DEVICE_SERIAL_ID "0886"  // Change this for each device (e.g., 0001, 0002, etc.)  
 
 #define UNIQUE_DEVICE_ID WORK_PACKAGE DEVICE_TYPE DEVICE_CODE_UPLOAD_DATE DEVICE_SERIAL_ID
 
-#define HORN_MODE 0  // 1 WIred, 0 Wireless
-#define OTA 1// Set to 1 for OTA mode, 0 for normal mode
+#define HORN_MODE 1  // 1 WIred, 0 Wireless
+#define OTA 0// Set to 1 for OTA mode, 0 for normal mode
 #define HW_VERSION "3.0"
 #define FW_VERSION "V1.502"
 #define OTA_DATE "260101"
@@ -100,6 +100,16 @@ enum ButtonState {
     BUTTON_STATE_HOLDING,
     BUTTON_STATE_RELEASED
 };
+
+//HORN CONFIG
+enum HornCommand {
+    HORN_CMD_OFF_BEEP,
+    HORN_CMD_ON,
+    HORN_CMD_RF_OFF,
+    HORN_CMD_RF_ON
+};
+
+QueueHandle_t hornQueue;
 
 // Button variables
 Bounce2::Button button = Bounce2::Button();
@@ -300,6 +310,7 @@ void publishHeartbeat();
 void sendLedCommand(LedCommandType type);
 bool checkForNewFirmware();
 bool performOTAUpdate();
+void hornTask(void *pvParameters);
 
 // Task functions
 void mainTask(void* parameter);
@@ -391,6 +402,7 @@ void setup() {
     rfDataQueue = xQueueCreate(RF_DATA_QUEUE_SIZE, sizeof(RFData));
     ledCommandQueue = xQueueCreate(LED_CMD_QUEUE_SIZE, sizeof(LedCommand));
     mqttPublishQueue = xQueueCreate(MQTT_PUB_QUEUE_SIZE, sizeof(MQTTMessage));
+    hornQueue = xQueueCreate(5, sizeof(HornCommand));
     // buttonEventQueue = xQueueCreate(BUTTON_EVENT_QUEUE_SIZE, sizeof(ButtonEvent));
     
     // Create mutexes
@@ -411,6 +423,16 @@ void setup() {
     xTaskCreatePinnedToCore(buttonTask, "ButtonTask", BUTTON_TASK_STACK, NULL, BUTTON_TASK_PRIORITY, &buttonTaskHandle, 0);
     xTaskCreatePinnedToCore(rfSensorTask, "RFSensorTask", RF_SENSOR_TASK_STACK, NULL, RF_SENSOR_TASK_PRIORITY, &rfSensorTaskHandle, 0);
     xTaskCreatePinnedToCore(ledTask, "LedTask", LED_TASK_STACK, NULL, LED_TASK_PRIORITY, &ledTaskHandle, 0);
+
+    xTaskCreatePinnedToCore(
+        hornTask,
+        "HornTask",
+        4096,
+        NULL,
+        1,
+        NULL,
+        1
+    );
     
     SerialMon.println("All tasks created successfully");
 }
@@ -1175,6 +1197,52 @@ void ledTask(void* parameter) {
     }
 }
 
+void hornTask(void *pvParameters) {
+
+    HornCommand cmd;
+
+    while (1) {
+
+        if (xQueueReceive(hornQueue, &cmd, portMAX_DELAY) == pdTRUE) {
+
+            switch(cmd) {
+
+                case HORN_CMD_OFF_BEEP:
+
+                    digitalWrite(HORN_PIN, ON);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+
+                    digitalWrite(HORN_PIN, OFF);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+
+                    digitalWrite(HORN_PIN, ON);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+
+                    digitalWrite(HORN_PIN, OFF);
+
+                    break;
+
+                case HORN_CMD_ON:
+
+                    digitalWrite(HORN_PIN, ON);
+
+                    break;
+
+                case HORN_CMD_RF_OFF:
+
+                    rfSwitch.send(5190151, 24);
+
+                    break;
+
+                case HORN_CMD_RF_ON:
+
+                    rfSwitch.send(5190153, 24);
+
+                    break;
+            }
+        }
+    }
+}
 
 // ==================== OTA Task ====================
 void otaTask(void* parameter) {
@@ -1350,36 +1418,75 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     Serial.println(message);
     Serial.println("==========================================\n");
 
+    // if(message == "alarm off") {
+    //     sendLedCommand(LED_ALARM_OFF);
+    //     Serial.println("MQTT Command: Alarm OFF received");
+    //     if(HORN_MODE == 1) {
+    //         digitalWrite(HORN_PIN, ON);
+    //         vTaskDelay(pdMS_TO_TICKS(200));
+    //         digitalWrite(HORN_PIN, OFF);
+    //         vTaskDelay(pdMS_TO_TICKS(200));
+    //         digitalWrite(HORN_PIN, ON);
+    //         vTaskDelay(pdMS_TO_TICKS(200));
+    //         digitalWrite(HORN_PIN, OFF);
+    //         return;
+    //     }
+    //     else {
+    //         rfSwitch.send(5190151, 24);
+    //         return;
+    //     }
+    // }
+    // else if(message == "alarm on"){
+    //     sendLedCommand(LED_ALARM_ON);
+    //     Serial.println("MQTT Command: Alarm ON received");
+    //     if(HORN_MODE == 1) {
+    //         digitalWrite(HORN_PIN, ON);
+    //         return;
+    //     }
+    //     else {
+    //         rfSwitch.send(5190153, 24);
+    //         return;
+    //     }
+    // } 
+
     if(message == "alarm off") {
+
         sendLedCommand(LED_ALARM_OFF);
+
         Serial.println("MQTT Command: Alarm OFF received");
+
+        HornCommand cmd;
+
         if(HORN_MODE == 1) {
-            digitalWrite(HORN_PIN, ON);
-            vTaskDelay(pdMS_TO_TICKS(200));
-            digitalWrite(HORN_PIN, OFF);
-            vTaskDelay(pdMS_TO_TICKS(200));
-            digitalWrite(HORN_PIN, ON);
-            vTaskDelay(pdMS_TO_TICKS(200));
-            digitalWrite(HORN_PIN, OFF);
-            return;
+            cmd = HORN_CMD_OFF_BEEP;
         }
         else {
-            rfSwitch.send(5190151, 24);
-            return;
+            cmd = HORN_CMD_RF_OFF;
         }
+
+        xQueueSend(hornQueue, &cmd, 0);
+
+        return;
     }
-    else if(message == "alarm on"){
+    else if(message == "alarm on") {
+
         sendLedCommand(LED_ALARM_ON);
+
         Serial.println("MQTT Command: Alarm ON received");
+
+        HornCommand cmd;
+
         if(HORN_MODE == 1) {
-            digitalWrite(HORN_PIN, ON);
-            return;
+            cmd = HORN_CMD_ON;
         }
         else {
-            rfSwitch.send(5190153, 24);
-            return;
+            cmd = HORN_CMD_RF_ON;
         }
-    } 
+
+        xQueueSend(hornQueue, &cmd, 0);
+
+        return;
+    }
 
     else if(message == "ping") {
         Serial.println("MQTT Command: Ping received");
