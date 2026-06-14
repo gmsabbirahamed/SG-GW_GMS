@@ -155,7 +155,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         Serial.println("MQTT Command: Ping received");
         MQTTMessage response;
         snprintf(response.topic, sizeof(response.topic), "%s", MQTT_AC_ACK);
-        snprintf(response.payload, sizeof(response.payload), "%s,%s,%d", DEVICE_ID.c_str(),"gsm_connected", modem.getSignalQuality());
+        snprintf(response.payload, sizeof(response.payload), "%s,%s,%s,%d", DEVICE_ID.c_str(),"gsm_connected",FW_VERSION, modem.getSignalQuality());
         sendLedCommand(LED_PING_ACK);
         xQueueSend(mqttPublishQueue, &response, pdMS_TO_TICKS(100));
         return;
@@ -215,6 +215,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         SerialMon.println("Device Armed?: " + String(deviceArmed ? "Yes" : "No"));
         preferences.end();
 
+        MQTTMessage arm1Response;
+        snprintf(arm1Response.topic, sizeof(arm1Response.topic), "%s", MQTT_AC_ACK);
+        snprintf(arm1Response.payload, sizeof(arm1Response.payload), "%s,%s", DEVICE_ID.c_str(),"Device Armed");
+        xQueueSend(mqttPublishQueue, &arm1Response, pdMS_TO_TICKS(100));
+        return;
+
         sendLedCommand(LED_PING_ACK);
 
         return;
@@ -228,6 +234,11 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         preferences.putBool("armed", false);
         SerialMon.println("Device Armed?: " + String(deviceArmed ? "Yes" : "No"));
         preferences.end();
+
+        MQTTMessage arm0Response;
+        snprintf(arm0Response.topic, sizeof(arm0Response.topic), "%s", MQTT_AC_ACK);
+        snprintf(arm0Response.payload, sizeof(arm0Response.payload), "%s,%s", DEVICE_ID.c_str(),"Device Disarmed");
+        xQueueSend(mqttPublishQueue, &arm0Response, pdMS_TO_TICKS(100));
 
         sendLedCommand(LED_DISARMED);
         return;

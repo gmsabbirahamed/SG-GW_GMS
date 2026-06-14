@@ -10,8 +10,8 @@
 // ==================== Configuration ====================
 #define OTA 1  // Set to 1 for OTA mode, 0 for normal mode
 #define HW_VERSION "3.0"
-#define FW_VERSION "V1.201"
-#define OTA_DATE "260101"
+#define FW_VERSION "V1.202"
+#define OTA_DATE "260614"
 
 #define WORK_PACKAGE "1191"
 #define DEVICE_TYPE "03"
