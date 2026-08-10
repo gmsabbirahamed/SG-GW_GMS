@@ -23,6 +23,8 @@ TaskHandle_t mainTaskHandle = NULL;
 #define MQTT_PUB_QUEUE_SIZE 20
 
 //Function prototypes
+void publishHeartbeat();
+void publishACHeartbeat();
 void publishEnergyData();
 void mainTask(void* parameter);
 
@@ -118,8 +120,10 @@ void mainTask(void* parameter) {
         if (millis() - lastHeartbeatTime >= HEARTBEAT_INTERVAL) {
             if (deviceOnline) {
                 publishHeartbeat();
+                vTaskDelay(pdMS_TO_TICKS(50));
+                publishACHeartbeat();
                 #ifdef USE_ENERGY_METER
-                vTaskDelay(pdMS_TO_TICKS(250));
+                    vTaskDelay(pdMS_TO_TICKS(250));
                     publishEnergyData();
                 #endif
                 lastHeartbeatTime = millis();
@@ -153,11 +157,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
     if(message == "ping") {
         Serial.println("MQTT Command: Ping received");
-        MQTTMessage response;
-        snprintf(response.topic, sizeof(response.topic), "%s", MQTT_AC_ACK);
-        snprintf(response.payload, sizeof(response.payload), "%s,%s,%s,%d", DEVICE_ID.c_str(),"gsm_connected",FW_VERSION, modem.getSignalQuality());
-        sendLedCommand(LED_PING_ACK);
-        xQueueSend(mqttPublishQueue, &response, pdMS_TO_TICKS(100));
+        publishACHeartbeat();
         return;
     }
 
@@ -319,8 +319,6 @@ void publishHeartbeat() {
     uint8_t rssi = modem.getSignalQuality();
     int health = ESP.getFreeHeap();
     int uptime_m = millis() / 60000;
-
-    //String payload = DEVICE_ID + "," + FW_VERSION + "," + HW_VERSION + "," + 1100 + "," + health  + "," + uptime_m + "," + rssi ;
     bool acLine = digitalRead(ACLINE_PIN) == HIGH ? true : false;
     bool wifiActive = false;
     bool gsmActive = true;
@@ -353,6 +351,38 @@ void publishHeartbeat() {
     }
 
     sendLedCommand(LED_HEARTBEAT);
+}
+
+// HB = 1191032506160004,FWV:V1.201,HWV:3.0,ARMED:1,DATA_TYPE:gsm,AC_LINE:0,SD_LOGING:1,HEALTH:123456,UP_TIME:789Min,CSQ:-20
+void publishACHeartbeat() {
+    MQTTMessage hbMsg;
+    snprintf(hbMsg.topic, sizeof(hbMsg.topic), "%s", MQTT_AC_HB);
+    uint8_t rssi = modem.getSignalQuality();
+    int health = ESP.getFreeHeap();
+    int uptime_m = millis() / 60000;
+
+    bool acLine = digitalRead(ACLINE_PIN) == HIGH ? true : false;
+    bool wifiActive = false;
+    bool gsmActive = true;
+    bool sdReady = false;
+
+    String payload = String(DEVICE_ID) +  + 
+                        ",FWV:" + FW_VERSION +
+                        ",HWV:" + HW_VERSION +
+                        ",ARMED:" + (deviceArmed ? "1" : "0") +
+                        ",DATA_TYPE:" + (gsmActive ? "gsm" : "ERROR") + 
+                        ",AC_LINE:" + (acLine ? "1" : "0") + 
+                        ",SD_LOGING:" + (sdReady ? "1" : "0") +
+                        ",HEALTH:" + String(health) +
+                        ",UP_TIME:" + String(uptime_m) + "Min" +
+                        ",CSQ:" + String(rssi);
+
+    Serial.println(payload);
+    snprintf(hbMsg.payload, sizeof(hbMsg.payload), "%s", payload.c_str());
+    
+    if (xQueueSend(mqttPublishQueue, &hbMsg, pdMS_TO_TICKS(100)) == pdTRUE) {
+        SerialMon.println("MainTask: Heartbeat queued");
+    }
 }
 
 // ==================== Helper Functions ====================
