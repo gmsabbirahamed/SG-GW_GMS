@@ -9,14 +9,14 @@
 
 // ==================== Configuration ====================
 #define OTA 1  // Set to 1 for OTA mode, 0 for normal mode
-#define HW_VERSION "3.0"
-#define FW_VERSION "V1.202"
-#define OTA_DATE "260614"
+#define HW_VERSION "3.2"
+#define FW_VERSION "V1.263"
+#define OTA_DATE "260810"
 
-#define WORK_PACKAGE "1191"
+#define WORK_PACKAGE "1293"
 #define DEVICE_TYPE "03"
-#define DEVICE_CODE_UPLOAD_DATE "250616"
-#define DEVICE_SERIAL_ID "0119"
+#define DEVICE_CODE_UPLOAD_DATE "260810"
+#define DEVICE_SERIAL_ID "0001"
 
 #define UNIQUE_DEVICE_ID WORK_PACKAGE DEVICE_TYPE DEVICE_CODE_UPLOAD_DATE DEVICE_SERIAL_ID
 
@@ -65,11 +65,12 @@ bool modemWasInitialized = false;
 // ==================== Global Variables ====================
 const char* MQTT_EM_HB = "DMA/EM/HB";
 const char* MQTT_EM_PUB = "DMA/EM/PUB";
-const char* MQTT_AC_HB = "DMA/MeshAC/HB";
-const char* MQTT_AC_GW_HB = "DMA/MeshAC/GW/HB";
-const char* MQTT_AC_SUB = "DMA/MeshAC/SUB/";
-const char* MQTT_AC_ACK = "DMA/MeshAC/ACK";
-const char* MQTT_AC_TMP = "DMA/MeshAC/TEMP";
+const char* MQTT_EM_SUB = "DMA/EM/SUB/";
+const char* MQTT_EM_ACK = "DMA/EM/ACK";
+// const char* MQTT_AC_HB = "DMA/MeshAC/HB";
+// const char* MQTT_AC_GW_HB = "DMA/MeshAC/GW/HB";
+// const char* MQTT_AC_ACK = "DMA/MeshAC/ACK";
+// const char* MQTT_AC_TMP = "DMA/MeshAC/TEMP";
 
 struct MQTTMessage {
     char topic[50];

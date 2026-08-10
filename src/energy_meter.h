@@ -10,8 +10,11 @@
 // #define USE_DZ81_DZS500 // Uncomment to use DZS500 3-phase meter
 
 // RS485 Serial2 Pins
-#define RS485_RX 27
-#define RS485_TX 14
+// #define RS485_RX 27
+// #define RS485_TX 14
+
+#define RS485_RX 26
+#define RS485_TX 25
 
 #ifdef USE_SELEC_MFM384
     // Modbus register addresses

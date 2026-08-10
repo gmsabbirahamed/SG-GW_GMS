@@ -2,7 +2,7 @@
 #include "gsm.h"
 #include "led.h"
 #include "button.h"
-#include "mesh_gw.h"
+// #include "mesh_gw.h"
 #include "energy_meter.h"
 
 Preferences preferences;
@@ -24,7 +24,7 @@ TaskHandle_t mainTaskHandle = NULL;
 
 //Function prototypes
 void publishHeartbeat();
-void publishACHeartbeat();
+// void publishACHeartbeat();
 void publishEnergyData();
 void mainTask(void* parameter);
 
@@ -88,7 +88,7 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonISR, CHANGE);
 
     Button_setup();
-    mesh_gw_setup();
+    // mesh_gw_setup();
     energy_meter_setup();
 
     // Create tasks
@@ -121,7 +121,7 @@ void mainTask(void* parameter) {
             if (deviceOnline) {
                 publishHeartbeat();
                 vTaskDelay(pdMS_TO_TICKS(50));
-                publishACHeartbeat();
+                // publishACHeartbeat();
                 #ifdef USE_ENERGY_METER
                     vTaskDelay(pdMS_TO_TICKS(250));
                     publishEnergyData();
@@ -157,7 +157,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
     if(message == "ping") {
         Serial.println("MQTT Command: Ping received");
-        publishACHeartbeat();
+        publishHeartbeat();
         return;
     }
 
@@ -198,7 +198,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         Serial.println(simID);
 
         MQTTMessage response2;
-        snprintf(response2.topic, sizeof(response2.topic), "%s", MQTT_AC_ACK);
+        snprintf(response2.topic, sizeof(response2.topic), "%s", MQTT_EM_ACK);
         snprintf(response2.payload, sizeof(response2.payload), "%s,%s,%s", DEVICE_ID.c_str(),operatorName, simID);
         sendLedCommand(LED_PING_ACK);
         xQueueSend(mqttPublishQueue, &response2, pdMS_TO_TICKS(100));
@@ -216,7 +216,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         preferences.end();
 
         MQTTMessage arm1Response;
-        snprintf(arm1Response.topic, sizeof(arm1Response.topic), "%s", MQTT_AC_ACK);
+        snprintf(arm1Response.topic, sizeof(arm1Response.topic), "%s", MQTT_EM_ACK);
         snprintf(arm1Response.payload, sizeof(arm1Response.payload), "%s,%s", DEVICE_ID.c_str(),"Device Armed");
         xQueueSend(mqttPublishQueue, &arm1Response, pdMS_TO_TICKS(100));
         return;
@@ -236,7 +236,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         preferences.end();
 
         MQTTMessage arm0Response;
-        snprintf(arm0Response.topic, sizeof(arm0Response.topic), "%s", MQTT_AC_ACK);
+        snprintf(arm0Response.topic, sizeof(arm0Response.topic), "%s", MQTT_EM_ACK);
         snprintf(arm0Response.payload, sizeof(arm0Response.payload), "%s,%s", DEVICE_ID.c_str(),"Device Disarmed");
         xQueueSend(mqttPublishQueue, &arm0Response, pdMS_TO_TICKS(100));
 
@@ -279,17 +279,6 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         sendLedCommand(LED_DISARMED);
         return;
     }
-
-    Message msg;
-    msg.sender_id = Local_ID;
-    msg.receiver_id = message.substring(0, commaIndex);
-    msg.command = message.substring(commaIndex + 1);
-    msg.type = "cmd";
-    msg.msg_id = generateMessageID();
-
-    String payload2 = msg.sender_id + "," + msg.receiver_id + "," + msg.command + "," + msg.type + "," + msg.msg_id;
-    esp_now_send(broadcastAddress, (uint8_t*)payload2.c_str(), payload2.length());
-    Serial.println("📤 CMD Sent: " + payload2);
     
 }
 //==================================================================
@@ -339,21 +328,11 @@ void publishHeartbeat() {
         SerialMon.println("MainTask: Energy Meter Heartbeat queued");
     }
 
-    vTaskDelay(pdMS_TO_TICKS(250));
-
-    //Heartbeat for AC Automation
-    MQTTMessage acHbMsg;
-    snprintf(acHbMsg.topic, sizeof(acHbMsg.topic), "%s", MQTT_AC_GW_HB);
-    snprintf(acHbMsg.payload, sizeof(acHbMsg.payload), "%s", payload.c_str());
-    
-    if (xQueueSend(mqttPublishQueue, &acHbMsg, pdMS_TO_TICKS(100)) == pdTRUE) {
-        SerialMon.println("MainTask: AC Heartbeat queued");
-    }
-
     sendLedCommand(LED_HEARTBEAT);
 }
 
 // HB = 1191032506160004,FWV:V1.201,HWV:3.0,ARMED:1,DATA_TYPE:gsm,AC_LINE:0,SD_LOGING:1,HEALTH:123456,UP_TIME:789Min,CSQ:-20
+/*
 void publishACHeartbeat() {
     MQTTMessage hbMsg;
     snprintf(hbMsg.topic, sizeof(hbMsg.topic), "%s", MQTT_AC_HB);
@@ -384,6 +363,7 @@ void publishACHeartbeat() {
         SerialMon.println("MainTask: Heartbeat queued");
     }
 }
+    */
 
 // ==================== Helper Functions ====================
 void suspendAllTasks() {

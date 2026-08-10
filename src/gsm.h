@@ -29,7 +29,7 @@ const char* mqttPass = "Secret!@#$1234";
 
 String firmwareUrl = "";
 // const char* defaultFirmwareUrl = "http://ota.gmsabbirahamed.com/esp32/firmware/blink/firmware.bin";
-const char* defaultFirmwareUrl = "http://iot2.dma-bd.com:5000/download/acautomationv1201.bin";
+const char* defaultFirmwareUrl = "http://iot2.dma-bd.com:5000/download/incepta_em.bin";
 
 //Task Handles
 TaskHandle_t networkTaskHandle = NULL;
@@ -214,7 +214,7 @@ bool connectToMQTT() {
 
     if (connected) {
         SerialMon.println("NetworkTask: MQTT connected");
-        String fullSubTopic = MQTT_AC_SUB + DEVICE_ID;
+        String fullSubTopic = MQTT_EM_SUB + DEVICE_ID;
         mqtt.subscribe(fullSubTopic.c_str());
         SerialMon.printf("NetworkTask: Subscribed to: %s\n", fullSubTopic.c_str());
     } else {
